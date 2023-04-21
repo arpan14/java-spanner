@@ -1511,6 +1511,11 @@ class SessionPool {
       delegate.prepareReadWriteTransaction();
     }
 
+    @Override
+    public boolean isLongRunningTransaction() {
+      return delegate.isLongRunningTransaction();
+    }
+
     private void keepAlive() {
       markUsed();
       final Span previousSpan = delegate.getCurrentSpan();
@@ -1636,6 +1641,104 @@ class SessionPool {
   }
 
   /**
+   * Background task for preventing session leaks. Tasks:
+   *
+   */
+  final class InactiveTransactionHandler {
+    @VisibleForTesting
+    final Duration recurrenceDuration = Duration.ofMinutes(10);
+    final double usedSessionsRatioThreshold = 0.95;
+    // transaction that are not long-running are expected to complete within 60 minutes.
+    final Duration transactionCompletionThreshold = Duration.ofMinutes(60L);
+
+    @GuardedBy("lock")
+    boolean closed = false;
+
+    @GuardedBy("lock")
+    boolean running = false;
+
+    @GuardedBy("lock")
+    ScheduledFuture<?> scheduledFuture;
+
+    void init() {
+      // TODO if there is an active task already running we should not initialise a new one.
+      // Scheduled pool maintenance worker.
+      if(preconditions()) {
+        synchronized (lock) {
+          scheduledFuture =
+              executor.scheduleAtFixedRate(
+                  this::cleanLongRunningTransactions, 0,
+                  recurrenceDuration.toMinutes(), TimeUnit.MINUTES);
+        }
+      }
+    }
+
+    boolean preconditions() {
+      if((options.warnInactiveTransactions() || options.closeInactiveTransactions())
+          && !running && isSessionUsageAboveThreshold()) {
+        return true;
+      }
+      return false;
+    }
+    void close() {
+      synchronized (lock) {
+        if (!closed) {
+          closed = true;
+          scheduledFuture.cancel(false);
+        }
+      }
+    }
+
+    boolean isClosed() {
+      synchronized (lock) {
+        return closed;
+      }
+    }
+
+    // cleans up transactions which are unexpectedly long-running.
+    void cleanLongRunningTransactions() {
+      synchronized (lock) {
+        if (SessionPool.this.isClosed()) {
+          return;
+        }
+        running = true;
+        if(isSessionUsageAboveThreshold()) {
+          removeLongRunningSessions(clock.instant());
+        } else {
+          scheduledFuture.cancel(false);
+        }
+      }
+    }
+
+    boolean isSessionUsageAboveThreshold() {
+      synchronized (lock) {
+        double usedSessionsRatio = getRatioOfSessionsInUse();
+        if(usedSessionsRatio > usedSessionsRatioThreshold) {
+          return true;
+        }
+        return false;
+      }
+    }
+    private void removeLongRunningSessions(Instant currTime) {
+      synchronized (lock) {
+        Iterator<PooledSession> iterator = sessions.descendingIterator();
+        while (iterator.hasNext()) {
+          final PooledSession session = iterator.next();
+          final Duration durationFromLastUse = Duration.between(session.lastUseTime, currTime);
+
+          if(!session.delegate.isLongRunningTransaction()
+              && durationFromLastUse.toMinutes() >= transactionCompletionThreshold.toMinutes()) {
+            if (session.state != SessionState.CLOSING) {
+              removeFromPool(session);
+              iterator.remove();
+            }
+          }
+        }
+      }
+    }
+  }
+
+    /**
    * Background task to maintain the pool. Tasks:
    *
    * <ul>
@@ -1820,6 +1923,8 @@ class SessionPool {
   private final ExecutorFactory<ScheduledExecutorService> executorFactory;
 
   final PoolMaintainer poolMaintainer;
+
+  final InactiveTransactionHandler inactiveTransactionHandler;
   private final Clock clock;
   private final Object lock = new Object();
   private final Random random = new Random();
@@ -1959,6 +2064,7 @@ class SessionPool {
     this.sessionClient = sessionClient;
     this.clock = clock;
     this.poolMaintainer = new PoolMaintainer();
+    this.inactiveTransactionHandler = new InactiveTransactionHandler();
     this.initMetricsCollection(metricRegistry, labelValues);
     this.waitOnMinSessionsLatch =
         options.getMinSessions() > 0 ? new CountDownLatch(1) : new CountDownLatch(0);
@@ -2006,6 +2112,13 @@ class SessionPool {
   int getNumberOfSessionsInUse() {
     synchronized (lock) {
       return numSessionsInUse;
+    }
+  }
+
+  @VisibleForTesting
+  float getRatioOfSessionsInUse() {
+    synchronized (lock) {
+      return (float) numSessionsInUse/getNumberOfSessionsInPool();
     }
   }
 
@@ -2159,6 +2272,9 @@ class SessionPool {
       } else {
         span.addAnnotation("Acquired session");
       }
+
+      span.addAnnotation("Handling inactive transactions");
+      inactiveTransactionHandler.init();
       return checkoutSession(span, sess, waiter);
     }
   }
@@ -2314,6 +2430,10 @@ class SessionPool {
       if (!poolMaintainer.isClosed()) {
         pendingClosure += 1; // For pool maintenance thread
         poolMaintainer.close();
+      }
+
+      if (!inactiveTransactionHandler.isClosed()) {
+        inactiveTransactionHandler.close();
       }
 
       sessions.clear();

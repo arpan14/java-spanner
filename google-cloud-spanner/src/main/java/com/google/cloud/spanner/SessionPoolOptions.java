@@ -49,6 +49,8 @@ public class SessionPoolOptions {
   private final Duration removeInactiveSessionAfter;
   private final ActionOnSessionNotFound actionOnSessionNotFound;
   private final ActionOnSessionLeak actionOnSessionLeak;
+
+  private final ActionOnInactiveTransaction actionOnInactiveTransaction;
   private final long initialWaitForSessionTimeoutMillis;
   private final boolean autoDetectDialect;
   private final Duration waitForMinSessions;
@@ -71,6 +73,7 @@ public class SessionPoolOptions {
     this.removeInactiveSessionAfter = builder.removeInactiveSessionAfter;
     this.autoDetectDialect = builder.autoDetectDialect;
     this.waitForMinSessions = builder.waitForMinSessions;
+    this.actionOnInactiveTransaction = builder.actionOnInactiveTransaction;
   }
 
   @Override
@@ -175,6 +178,13 @@ public class SessionPoolOptions {
     return autoDetectDialect;
   }
 
+  public boolean closeInactiveTransactions() {
+    return actionOnInactiveTransaction == ActionOnInactiveTransaction.CLOSE;
+  }
+  public boolean warnInactiveTransactions() {
+    return actionOnInactiveTransaction == ActionOnInactiveTransaction.WARN;
+  }
+
   @VisibleForTesting
   long getInitialWaitForSessionTimeoutMillis() {
     return initialWaitForSessionTimeoutMillis;
@@ -214,6 +224,10 @@ public class SessionPoolOptions {
     FAIL
   }
 
+  private enum ActionOnInactiveTransaction {
+    WARN,
+    CLOSE
+  }
   /** Builder for creating SessionPoolOptions. */
   public static class Builder {
     private boolean minSessionsSet = false;
@@ -234,6 +248,8 @@ public class SessionPoolOptions {
     private long initialWaitForSessionTimeoutMillis = 30_000L;
     private ActionOnSessionNotFound actionOnSessionNotFound = ActionOnSessionNotFound.RETRY;
     private ActionOnSessionLeak actionOnSessionLeak = ActionOnSessionLeak.WARN;
+    private ActionOnInactiveTransaction actionOnInactiveTransaction
+        = ActionOnInactiveTransaction.CLOSE;
     private long loopFrequency = 10 * 1000L;
     private int keepAliveIntervalMinutes = 30;
     private Duration removeInactiveSessionAfter = Duration.ofMinutes(55L);
@@ -253,6 +269,7 @@ public class SessionPoolOptions {
       this.initialWaitForSessionTimeoutMillis = options.initialWaitForSessionTimeoutMillis;
       this.actionOnSessionNotFound = options.actionOnSessionNotFound;
       this.actionOnSessionLeak = options.actionOnSessionLeak;
+      this.actionOnInactiveTransaction = options.actionOnInactiveTransaction;
       this.loopFrequency = options.loopFrequency;
       this.keepAliveIntervalMinutes = options.keepAliveIntervalMinutes;
       this.removeInactiveSessionAfter = options.removeInactiveSessionAfter;
@@ -345,6 +362,26 @@ public class SessionPoolOptions {
      */
     public Builder setBlockIfPoolExhausted() {
       this.actionOnExhaustion = ActionOnExhaustion.BLOCK;
+      return this;
+    }
+
+    /**
+     * If there are inactive transactions, log warning messages with the origin of
+     * such transactions to aid debugging. The transactions will continue to remain open.
+     * @return
+     */
+    public Builder setWarnIfInactiveTransactions() {
+      this.actionOnInactiveTransaction = ActionOnInactiveTransaction.WARN;
+      return this;
+    }
+
+    /**
+     * Sets whether the client should automatically close inactive transactions which are running
+     * for unexpectedly large durations.
+     * @return
+     */
+    public Builder setCloseIfInactiveTransactions() {
+      this.actionOnInactiveTransaction = ActionOnInactiveTransaction.CLOSE;
       return this;
     }
 

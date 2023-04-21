@@ -56,6 +56,17 @@ public interface Session extends DatabaseClient, AutoCloseable {
    */
   void prepareReadWriteTransaction();
 
+  /**
+   * Transactions can be long-running. This method determines if current transaction being performed
+   * within session is long-running or not. Typically, transactions are not long-running and hence
+   * this method returns false by default.
+   *
+   * @return false by default. Override the method to return a different behaviour.
+   */
+  default boolean isLongRunningTransaction() {
+    return false;
+  }
+
   @Override
   void close();
 

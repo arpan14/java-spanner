@@ -86,6 +86,15 @@ class SessionImpl implements Session {
     void invalidate();
     /** Registers the current span on the transaction. */
     void setSpan(Span span);
+
+    /**
+     * Certain transaction can be long-running. This method allows each transaction type to specify
+     * if they are long-running or not.
+     * @return true if transaction can be long-running. ELse return false.
+     */
+    default boolean isLongRunning() {
+      return false;
+    }
   }
 
   private final SpannerImpl spanner;
