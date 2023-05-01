@@ -1670,13 +1670,15 @@ class SessionPool {
 
     // recurrence task for closing long-running transactions.
     @VisibleForTesting
-    private final Duration recurrenceDuration = Duration.ofMinutes(10);
+    private final Duration recurrenceDuration = Duration.ofMinutes(2);
 
     // long-running transactions would be cleaned up if utilisation > 95%
     private final double usedSessionsRatioThreshold = 0.95;
     // transaction that are not long-running are expected to complete within 60 minutes.
     private final Duration lastUseThreshold = Duration.ofMinutes(60L);
-    private volatile Instant lastExecutionTime;
+
+    @VisibleForTesting
+    volatile Instant lastExecutionTime;
 
     boolean closed = false;
 
@@ -1687,6 +1689,7 @@ class SessionPool {
     boolean running;
 
     void init() {
+      lastExecutionTime = clock.instant();
       // Scheduled pool maintenance worker.
       synchronized (lock) {
         scheduledFuture =
@@ -1722,7 +1725,6 @@ class SessionPool {
         running = true;
       }
       Instant currTime = clock.instant();
-      lastExecutionTime = currTime;
       removeIdleSessions(currTime);
       // Now go over all the remaining sessions and see if they need to be kept alive explicitly.
       keepAliveSessions(currTime);
@@ -1734,6 +1736,7 @@ class SessionPool {
         }
       }
       closeLongRunningTransactions(currTime);
+      lastExecutionTime = currTime;
     }
 
     private void removeIdleSessions(Instant currTime) {
@@ -1811,9 +1814,10 @@ class SessionPool {
           if (SessionPool.this.isClosed()) {
             return;
           }
-          // Execute the task only if its beyond 10 minutes since the last execution time.
-          if(Duration.between(currentTime, lastExecutionTime).toMinutes()
-              < recurrenceDuration.toMinutes()) {
+          // We would want this task to execute every 2 minutes. If the last execution time of task
+          // is in the last 2 minutes, then do not execute the task.
+          final Instant minExecutionTime = lastExecutionTime.plus(recurrenceDuration);
+          if(currentTime.isBefore(minExecutionTime)) {
             return;
           }
           if(options.closeInactiveTransactions() || options.warnInactiveTransactions()) {
@@ -1843,6 +1847,7 @@ class SessionPool {
                   sessionFuture.leakedException);
               if (options.closeInactiveTransactions() &&
                   session.state != SessionState.CLOSING) {
+                // TODO below method assumes that this is idle session removal and increments the flag
                 removeFromPool(session);
                 iterator.remove();
               }
