@@ -1640,104 +1640,6 @@ class SessionPool {
     }
   }
 
-  /**
-   * Background task for preventing session leaks. Tasks:
-   *
-   */
-  final class InactiveTransactionHandler {
-    @VisibleForTesting
-    final Duration recurrenceDuration = Duration.ofMinutes(10);
-    final double usedSessionsRatioThreshold = 0.95;
-    // transaction that are not long-running are expected to complete within 60 minutes.
-    final Duration transactionCompletionThreshold = Duration.ofMinutes(60L);
-
-    @GuardedBy("lock")
-    boolean closed = false;
-
-    @GuardedBy("lock")
-    boolean running = false;
-
-    @GuardedBy("lock")
-    ScheduledFuture<?> scheduledFuture;
-
-    void init() {
-      // TODO if there is an active task already running we should not initialise a new one.
-      // Scheduled pool maintenance worker.
-      if(preconditions()) {
-        synchronized (lock) {
-          scheduledFuture =
-              executor.scheduleAtFixedRate(
-                  this::cleanLongRunningTransactions, 0,
-                  recurrenceDuration.toMinutes(), TimeUnit.MINUTES);
-        }
-      }
-    }
-
-    boolean preconditions() {
-      if((options.warnInactiveTransactions() || options.closeInactiveTransactions())
-          && !running && isSessionUsageAboveThreshold()) {
-        return true;
-      }
-      return false;
-    }
-    void close() {
-      synchronized (lock) {
-        if (!closed) {
-          closed = true;
-          scheduledFuture.cancel(false);
-        }
-      }
-    }
-
-    boolean isClosed() {
-      synchronized (lock) {
-        return closed;
-      }
-    }
-
-    // cleans up transactions which are unexpectedly long-running.
-    void cleanLongRunningTransactions() {
-      synchronized (lock) {
-        if (SessionPool.this.isClosed()) {
-          return;
-        }
-        running = true;
-        if(isSessionUsageAboveThreshold()) {
-          removeLongRunningSessions(clock.instant());
-        } else {
-          scheduledFuture.cancel(false);
-        }
-      }
-    }
-
-    boolean isSessionUsageAboveThreshold() {
-      synchronized (lock) {
-        double usedSessionsRatio = getRatioOfSessionsInUse();
-        if(usedSessionsRatio > usedSessionsRatioThreshold) {
-          return true;
-        }
-        return false;
-      }
-    }
-    private void removeLongRunningSessions(Instant currTime) {
-      synchronized (lock) {
-        Iterator<PooledSession> iterator = sessions.descendingIterator();
-        while (iterator.hasNext()) {
-          final PooledSession session = iterator.next();
-          final Duration durationFromLastUse = Duration.between(session.lastUseTime, currTime);
-
-          if(!session.delegate.isLongRunningTransaction()
-              && durationFromLastUse.toMinutes() >= transactionCompletionThreshold.toMinutes()) {
-            if (session.state != SessionState.CLOSING) {
-              removeFromPool(session);
-              iterator.remove();
-            }
-          }
-        }
-      }
-    }
-  }
-
     /**
    * Background task to maintain the pool. Tasks:
    *
@@ -1748,6 +1650,9 @@ class SessionPool {
    *   <li>Keeps alive sessions that have not been used for a user configured time in order to keep
    *       MinSessions sessions alive in the pool at any time. The keep-alive traffic is smeared out
    *       over a window of 10 minutes to avoid bursty traffic.
+   *   <li> Removed unexpected long running transactions from the pool. Only certain transaction types
+     *   can be long running. This tasks checks the sessions which have been executing for a longer
+     *   than usual duration (60 minutes) and returns such sessions back to the pool.
    * </ul>
    */
   final class PoolMaintainer {
@@ -1763,9 +1668,16 @@ class SessionPool {
     // Number of loop iterations in which we need to keep alive all the sessions
     @VisibleForTesting final long numKeepAliveCycles = keepAliveMillis.toMillis() / loopFrequency;
 
-    Instant lastResetTime = Instant.ofEpochMilli(0);
-    int numSessionsToClose = 0;
-    int sessionsToClosePerLoop = 0;
+    // recurrence task for closing long-running transactions.
+    @VisibleForTesting
+    private final Duration recurrenceDuration = Duration.ofMinutes(10);
+
+    // long-running transactions would be cleaned up if utilisation > 95%
+    private final double usedSessionsRatioThreshold = 0.95;
+    // transaction that are not long-running are expected to complete within 60 minutes.
+    private final Duration lastUseThreshold = Duration.ofMinutes(60L);
+    private volatile Instant lastExecutionTime;
+
     boolean closed = false;
 
     @GuardedBy("lock")
@@ -1810,6 +1722,7 @@ class SessionPool {
         running = true;
       }
       Instant currTime = clock.instant();
+      lastExecutionTime = currTime;
       removeIdleSessions(currTime);
       // Now go over all the remaining sessions and see if they need to be kept alive explicitly.
       keepAliveSessions(currTime);
@@ -1820,6 +1733,7 @@ class SessionPool {
           decrementPendingClosures(1);
         }
       }
+      closeLongRunningTransactions(currTime);
     }
 
     private void removeIdleSessions(Instant currTime) {
@@ -1889,6 +1803,54 @@ class SessionPool {
         }
       }
     }
+
+      // cleans up transactions which are unexpectedly long-running.
+    void closeLongRunningTransactions(Instant currentTime) {
+      try {
+        synchronized (lock) {
+          if (SessionPool.this.isClosed()) {
+            return;
+          }
+          // Execute the task only if its beyond 10 minutes since the last execution time.
+          if(Duration.between(currentTime, lastExecutionTime).toMinutes()
+              < recurrenceDuration.toMinutes()) {
+            return;
+          }
+          if(options.closeInactiveTransactions() || options.warnInactiveTransactions()) {
+            removeLongRunningSessions(currentTime);
+          }
+        }
+      } catch (final Throwable t) {
+        logger.log(Level.WARNING, "Failed removing long running transactions", t);
+      }
+    }
+
+    private void removeLongRunningSessions(Instant currentTime) {
+      synchronized (lock) {
+        final double usedSessionsRatio = getRatioOfSessionsInUse();
+        if(usedSessionsRatio > usedSessionsRatioThreshold) {
+          Iterator<PooledSessionFuture> iterator = checkedOutSessions.iterator();
+          while (iterator.hasNext()) {
+            final PooledSessionFuture sessionFuture = iterator.next();
+            // the below get() call on future object is non-blocking since checkedOutSessions
+            // collection is populated only when the get() method in {@code PooledSessionFuture} is
+            // called.
+            final PooledSession session = sessionFuture.get();
+            final Duration durationFromLastUse = Duration.between(session.lastUseTime, currentTime);
+            if(!session.delegate.isLongRunningTransaction()
+                && durationFromLastUse.toMinutes() > lastUseThreshold.toMinutes()) {
+              logger.log(Level.WARNING, "Removing long running session",
+                  sessionFuture.leakedException);
+              if (options.closeInactiveTransactions() &&
+                  session.state != SessionState.CLOSING) {
+                removeFromPool(session);
+                iterator.remove();
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   private enum Position {
@@ -1923,8 +1885,6 @@ class SessionPool {
   private final ExecutorFactory<ScheduledExecutorService> executorFactory;
 
   final PoolMaintainer poolMaintainer;
-
-  final InactiveTransactionHandler inactiveTransactionHandler;
   private final Clock clock;
   private final Object lock = new Object();
   private final Random random = new Random();
@@ -2064,7 +2024,6 @@ class SessionPool {
     this.sessionClient = sessionClient;
     this.clock = clock;
     this.poolMaintainer = new PoolMaintainer();
-    this.inactiveTransactionHandler = new InactiveTransactionHandler();
     this.initMetricsCollection(metricRegistry, labelValues);
     this.waitOnMinSessionsLatch =
         options.getMinSessions() > 0 ? new CountDownLatch(1) : new CountDownLatch(0);
@@ -2116,9 +2075,11 @@ class SessionPool {
   }
 
   @VisibleForTesting
-  float getRatioOfSessionsInUse() {
+  double getRatioOfSessionsInUse() {
     synchronized (lock) {
-      return (float) numSessionsInUse/getNumberOfSessionsInPool();
+      final int maxSessions = options.getMaxSessions();
+      if(maxSessions == 0) return 0;
+      return (double) numSessionsInUse/maxSessions;
     }
   }
 
@@ -2272,9 +2233,6 @@ class SessionPool {
       } else {
         span.addAnnotation("Acquired session");
       }
-
-      span.addAnnotation("Handling inactive transactions");
-      inactiveTransactionHandler.init();
       return checkoutSession(span, sess, waiter);
     }
   }
@@ -2430,10 +2388,6 @@ class SessionPool {
       if (!poolMaintainer.isClosed()) {
         pendingClosure += 1; // For pool maintenance thread
         poolMaintainer.close();
-      }
-
-      if (!inactiveTransactionHandler.isClosed()) {
-        inactiveTransactionHandler.close();
       }
 
       sessions.clear();
