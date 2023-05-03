@@ -107,6 +107,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 import org.threeten.bp.Duration;
+import org.threeten.bp.Instant;
 
 @RunWith(JUnit4.class)
 public class DatabaseClientImplTest {
@@ -194,6 +195,56 @@ public class DatabaseClientImplTest {
     mockSpanner.removeAllExecutionTimes();
   }
 
+  @Test
+  public void testPoolMaintainer_whenInactiveTransactions_removeSessionsFromPool() throws Exception {
+    spanner =
+        SpannerOptions.newBuilder()
+            .setProjectId(TEST_PROJECT)
+            .setDatabaseRole(TEST_DATABASE_ROLE)
+            .setChannelProvider(channelProvider)
+            .setCredentials(NoCredentials.getInstance())
+            .setSessionPoolOption(SessionPoolOptions.newBuilder().setMinSessions(1)
+                .setMaxSessions(3).setCloseIfInactiveTransactions().build())
+            .build()
+            .getService();
+    DatabaseClientImpl client =
+        (DatabaseClientImpl) spanner.getDatabaseClient(DatabaseId.of(TEST_PROJECT, TEST_INSTANCE, TEST_DATABASE));
+    try (ResultSet resultSet =
+        client
+            .singleUse()
+            .executeQuery(SELECT1, Options.tag("app=spanner,env=test,action=query"))) {
+      while (resultSet.next()) {}
+    }
+
+    assertThat(client.pool.getNumberOfSessionsInPool()).isEqualTo(1);
+    assertThat(client.pool.numInactiveSessionsRemoved()).isEqualTo(0);
+
+    final Instant lastExecutionTime1 = client.pool.poolMaintainer.lastExecutionTime;
+    // take action only if it's been more than 2 minutes
+    Thread.sleep(Duration.ofSeconds(10L).toMillis());
+    final Instant lastExecutionTime2 = client.pool.poolMaintainer.lastExecutionTime;
+    assertThat(lastExecutionTime1).isEqualTo(lastExecutionTime2);
+
+    // TODO check if there is a way to fake clock
+
+  }
+
+  @Test
+  public void testPoolMaintainer_whenValidLongRunningTransactions_takeNoAction() {
+    DatabaseClient client =
+        spanner.getDatabaseClient(DatabaseId.of(TEST_PROJECT, TEST_INSTANCE, TEST_DATABASE));
+    Timestamp timestamp =
+        client.write(
+            Collections.singletonList(
+                Mutation.newInsertBuilder("FOO").set("ID").to(1L).set("NAME").to("Bar").build()));
+    assertNotNull(timestamp);
+
+    List<CommitRequest> commitRequests = mockSpanner.getRequestsOfType(CommitRequest.class);
+    assertThat(commitRequests).hasSize(1);
+    CommitRequest commit = commitRequests.get(0);
+    assertNotNull(commit.getRequestOptions());
+    assertEquals(Priority.PRIORITY_UNSPECIFIED, commit.getRequestOptions().getPriority());
+  }
   @Test
   public void testWrite() {
     DatabaseClient client =

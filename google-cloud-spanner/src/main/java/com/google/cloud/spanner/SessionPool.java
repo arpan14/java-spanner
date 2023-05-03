@@ -51,6 +51,7 @@ import com.google.cloud.spanner.Options.ReadOption;
 import com.google.cloud.spanner.Options.TransactionOption;
 import com.google.cloud.spanner.Options.UpdateOption;
 import com.google.cloud.spanner.SessionClient.SessionConsumer;
+import com.google.cloud.spanner.SessionPoolOptions.InactiveTransactionRemovalOptions;
 import com.google.cloud.spanner.SpannerException.ResourceNotFoundException;
 import com.google.cloud.spanner.SpannerImpl.ClosedException;
 import com.google.common.annotations.VisibleForTesting;
@@ -1667,7 +1668,7 @@ class SessionPool {
     private final Duration windowLength = Duration.ofMillis(TimeUnit.MINUTES.toMillis(10));
     // Frequency of the timer loop.
     @VisibleForTesting final long loopFrequency = options.getLoopFrequency();
-    // Number of loop iterations in which we need to to close all the sessions waiting for closure.
+    // Number of loop iterations in which we need to close all the sessions waiting for closure.
     @VisibleForTesting final long numClosureCycles = windowLength.toMillis() / loopFrequency;
     private final Duration keepAliveMillis =
         Duration.ofMillis(TimeUnit.MINUTES.toMillis(options.getKeepAliveIntervalMinutes()));
@@ -1822,17 +1823,19 @@ class SessionPool {
           if (SessionPool.this.isClosed()) {
             return;
           }
+          final InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions
+              = options.getInactiveTransactionRemovalOptions();
           // We would want this task to execute every 2 minutes. If the last execution time of task
           // is within the last 2 minutes, then do not execute the task.
           final Instant minExecutionTime =
               lastExecutionTime.plus(
-                  LongRunningTransactionHandler.recurrenceDuration);
+                  inactiveTransactionRemovalOptions.getRecurrenceDuration());
           if(currentTime.isBefore(minExecutionTime)) {
             return;
           }
           lastExecutionTime = currentTime; // update this only after we have decided to execute task
           if(options.closeInactiveTransactions() || options.warnInactiveTransactions()) {
-            removeLongRunningSessions(currentTime);
+            removeLongRunningSessions(currentTime, inactiveTransactionRemovalOptions);
           }
         }
       } catch (final Throwable t) {
@@ -1840,10 +1843,12 @@ class SessionPool {
       }
     }
 
-    private void removeLongRunningSessions(Instant currentTime) {
+    private void removeLongRunningSessions(
+        final Instant currentTime,
+        final InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions) {
       synchronized (lock) {
         final double usedSessionsRatio = getRatioOfSessionsInUse();
-        if(usedSessionsRatio > LongRunningTransactionHandler.usedSessionsRatioThreshold) {
+        if(usedSessionsRatio > inactiveTransactionRemovalOptions.getUsedSessionsRatioThreshold()) {
           Iterator<PooledSessionFuture> iterator = checkedOutSessions.iterator();
           while (iterator.hasNext()) {
             final PooledSessionFuture sessionFuture = iterator.next();
@@ -1854,9 +1859,10 @@ class SessionPool {
             final Duration durationFromLastUse = Duration.between(session.lastUseTime, currentTime);
             if(!session.delegate.isLongRunningTransaction()
                 && durationFromLastUse.toMinutes() >
-                LongRunningTransactionHandler.lastUseThreshold.toMinutes()) {
+                inactiveTransactionRemovalOptions.getLastUseThreshold().toMinutes()) {
               logger.log(Level.WARNING, "Removing long running session",
                   sessionFuture.leakedException);
+              numInactiveSessionsRemoved++;
               if (options.closeInactiveTransactions() &&
                   session.state != SessionState.CLOSING) {
                 removeFromPool(session);
@@ -1867,17 +1873,6 @@ class SessionPool {
         }
       }
     }
-  }
-
-  private static class LongRunningTransactionHandler {
-    // recurrence task for closing long-running transactions.
-    @VisibleForTesting
-    public static final Duration recurrenceDuration = Duration.ofMinutes(2);
-
-    // long-running transactions would be cleaned up if utilisation > 95%
-    public static final double usedSessionsRatioThreshold = 0.95;
-    // transaction that are not long-running are expected to complete within 60 minutes.
-    public static final Duration lastUseThreshold = Duration.ofMinutes(60L);
   }
 
   private enum Position {
@@ -1957,6 +1952,9 @@ class SessionPool {
 
   @GuardedBy("lock")
   private long numIdleSessionsRemoved = 0;
+
+  @GuardedBy("lock")
+  private long numInactiveSessionsRemoved = 0;
 
   private AtomicLong numWaiterTimeouts = new AtomicLong();
 
@@ -2125,6 +2123,12 @@ class SessionPool {
   long numIdleSessionsRemoved() {
     synchronized (lock) {
       return numIdleSessionsRemoved;
+    }
+  }
+
+  long numInactiveSessionsRemoved() {
+    synchronized (lock) {
+      return numInactiveSessionsRemoved;
     }
   }
 
