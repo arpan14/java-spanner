@@ -1292,11 +1292,6 @@ class SessionPool {
     }
 
     @Override
-    public boolean isLongRunningTransaction() {
-      return get().isLongRunningTransaction();
-    }
-
-    @Override
     public void close() {
       try {
         asyncClose().get();
@@ -1366,6 +1361,7 @@ class SessionPool {
     private volatile Instant lastUseTime;
     private volatile SpannerException lastException;
     private volatile boolean allowReplacing = true;
+    private volatile boolean isLongRunning = false;
 
     @GuardedBy("lock")
     private SessionState state;
@@ -1423,6 +1419,7 @@ class SessionPool {
         throws SpannerException {
       try {
         markUsed();
+        markLongRunning();
         return delegate.executePartitionedUpdate(stmt, options);
       } catch (SpannerException e) {
         throw lastException = e;
@@ -1518,11 +1515,6 @@ class SessionPool {
       delegate.prepareReadWriteTransaction();
     }
 
-    @Override
-    public boolean isLongRunningTransaction() {
-      return delegate.isLongRunningTransaction();
-    }
-
     private void keepAlive() {
       markUsed();
       final Span previousSpan = delegate.getCurrentSpan();
@@ -1576,6 +1568,10 @@ class SessionPool {
 
     void markUsed() {
       lastUseTime = clock.instant();
+    }
+
+    void markLongRunning() {
+      isLongRunning = true;
     }
 
     @Override
@@ -1857,9 +1853,9 @@ class SessionPool {
             // called.
             final PooledSession session = sessionFuture.get();
             final Duration durationFromLastUse = Duration.between(session.lastUseTime, currentTime);
-            if(!session.delegate.isLongRunningTransaction()
-                && durationFromLastUse.toMinutes() >
-                inactiveTransactionRemovalOptions.getLastUseThreshold().toMinutes()) {
+            if(!session.isLongRunning
+                && durationFromLastUse.toMillis() >
+                inactiveTransactionRemovalOptions.getExecutionTimeThreshold().toMillis()) {
               logger.log(Level.WARNING, "Removing long running session",
                   sessionFuture.leakedException);
               numInactiveSessionsRemoved++;

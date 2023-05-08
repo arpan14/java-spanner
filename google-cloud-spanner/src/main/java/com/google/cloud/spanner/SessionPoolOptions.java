@@ -238,16 +238,17 @@ public class SessionPoolOptions {
   }
 
   static class InactiveTransactionRemovalOptions {
-    // recurrence task for closing long-running transactions.
+    // recurrence duration for closing long-running transactions.
     private Duration recurrenceDuration;
 
-    // long-running transactions would be cleaned up if utilisation > 95%
+    // long-running transactions would be cleaned up if utilisation is greater than the below
+    // threshold
     private double usedSessionsRatioThreshold;
-    // transaction that are not long-running are expected to complete within 60 minutes.
-    private Duration lastUseThreshold;
+    // transaction that are not long-running are expected to complete within this defined threshold.
+    private Duration executionTimeThreshold;
 
     public InactiveTransactionRemovalOptions(final Builder builder) {
-      this.lastUseThreshold = builder.lastUseThreshold;
+      this.executionTimeThreshold = builder.executionTimeThreshold;
       this.recurrenceDuration = builder.recurrenceDuration;
       this.usedSessionsRatioThreshold = builder.usedSessionsRatioThreshold;
     }
@@ -260,8 +261,8 @@ public class SessionPoolOptions {
       return usedSessionsRatioThreshold;
     }
 
-    Duration getLastUseThreshold() {
-      return lastUseThreshold;
+    Duration getExecutionTimeThreshold() {
+      return executionTimeThreshold;
     }
 
     public static InactiveTransactionRemovalOptions.Builder newBuilder() {
@@ -274,7 +275,7 @@ public class SessionPoolOptions {
     static class Builder {
       private Duration recurrenceDuration = Duration.ofMinutes(2);
       private double usedSessionsRatioThreshold = 0.95;
-      private Duration lastUseThreshold = Duration.ofMinutes(60L);
+      private Duration executionTimeThreshold = Duration.ofMinutes(60L);
 
       public Builder() {}
 
@@ -285,8 +286,13 @@ public class SessionPoolOptions {
 
       private void validate() {
         Preconditions.checkArgument(
-            recurrenceDuration.toSecondsPart() >= Duration.ofSeconds(10L).toSecondsPart(),
-            "Recurrence duration should be more than 10 seconds");
+            recurrenceDuration.toMillis() > 0,
+            "Recurrence duration %s should be positive",
+            recurrenceDuration.toMillis());
+        Preconditions.checkArgument(
+            executionTimeThreshold.toMillis() > 0,
+            "Execution Time Threshold duration %s should be positive",
+            executionTimeThreshold.toMillis());
       }
 
       /**
@@ -315,13 +321,13 @@ public class SessionPoolOptions {
 
       /**
        *
-       * @param lastUseThreshold
+       * @param executionTimeThreshold
        * @return
        */
       @VisibleForTesting
-      InactiveTransactionRemovalOptions.Builder setLastUseThreshold(
-          final Duration lastUseThreshold) {
-        this.lastUseThreshold = lastUseThreshold;
+      InactiveTransactionRemovalOptions.Builder setExecutionTimeThreshold(
+          final Duration executionTimeThreshold) {
+        this.executionTimeThreshold = executionTimeThreshold;
         return this;
       }
     }
@@ -429,6 +435,12 @@ public class SessionPoolOptions {
 
     Builder setLoopFrequency(long loopFrequency) {
       this.loopFrequency = loopFrequency;
+      return this;
+    }
+
+    Builder setInactiveTransactionRemovalOptions(
+        InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions) {
+      this.inactiveTransactionRemovalOptions = inactiveTransactionRemovalOptions;
       return this;
     }
 

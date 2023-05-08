@@ -439,9 +439,4 @@ public class PartitionedDmlTransactionTest {
     assertEquals(Priority.PRIORITY_LOW, request.getRequestOptions().getPriority());
     assertThat(request.getRequestOptions().getRequestTag()).isEqualTo("app=spanner,env=test");
   }
-
-  @Test
-  public void testIsLongRunning() {
-    assertTrue(tx.isLongRunning());
-  }
 }

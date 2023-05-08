@@ -478,9 +478,4 @@ public class SessionImplTest {
             () -> txn.readRow("Dummy", Key.of(), Collections.singletonList("C")));
     assertEquals(ErrorCode.INTERNAL, e.getErrorCode());
   }
-
-  @Test
-  public void isLongRunningTransaction() {
-    assertFalse(session.isLongRunningTransaction());
-  }
 }

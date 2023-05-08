@@ -141,11 +141,6 @@ public class PartitionedDmlTransaction implements SessionImpl.SessionTransaction
   @Override
   public void setSpan(Span span) {}
 
-  @Override
-  public boolean isLongRunning() {
-    return true;
-  }
-
   private Duration tryUpdateTimeout(final Duration timeout, final Stopwatch stopwatch) {
     final Duration remainingTimeout =
         timeout.minus(stopwatch.elapsed(TimeUnit.MILLISECONDS), ChronoUnit.MILLIS);
