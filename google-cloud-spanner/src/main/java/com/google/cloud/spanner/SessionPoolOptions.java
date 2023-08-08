@@ -60,6 +60,7 @@ public class SessionPoolOptions {
    */
   @Deprecated private final long initialWaitForSessionTimeoutMillis;
 
+  private final AnonymousSessionOptions anonymousSessionOptions;
   private final boolean autoDetectDialect;
   private final Duration waitForMinSessions;
   private final Duration acquireSessionTimeout;
@@ -91,6 +92,7 @@ public class SessionPoolOptions {
     this.releaseToPosition = builder.releaseToPosition;
     this.inactiveTransactionRemovalOptions = builder.inactiveTransactionRemovalOptions;
     this.poolMaintainerClock = builder.poolMaintainerClock;
+    this.anonymousSessionOptions = builder.anonymousSessionOptions;
   }
 
   @Override
@@ -209,6 +211,21 @@ public class SessionPoolOptions {
 
   InactiveTransactionRemovalOptions getInactiveTransactionRemovalOptions() {
     return inactiveTransactionRemovalOptions;
+  }
+
+  boolean useSingleSessionForRO() {
+    return anonymousSessionOptions.actionForNumberOfAnonymousSessions
+        == ActionForNumberOfAnonymousSessions.SINGLE_SESSION;
+  }
+
+  boolean useSingleChannelForRO() {
+    return anonymousSessionOptions.actionForAnonymousSessionsChannelHints
+        == ActionForAnonymousSessionsChannelHints.SINGLE_CHANNEL;
+  }
+
+  boolean useMultipleChannelForRO() {
+    return anonymousSessionOptions.actionForAnonymousSessionsChannelHints
+        == ActionForAnonymousSessionsChannelHints.MULTI_CHANNEL;
   }
 
   boolean closeInactiveTransactions() {
@@ -522,6 +539,10 @@ public class SessionPoolOptions {
 
     private InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions =
         InactiveTransactionRemovalOptions.newBuilder().build();
+
+    private AnonymousSessionOptions anonymousSessionOptions =
+        AnonymousSessionOptions.newBuilder().build();
+
     private long loopFrequency = 10 * 1000L;
     private int keepAliveIntervalMinutes = 30;
     private Duration removeInactiveSessionAfter = Duration.ofMinutes(55L);
@@ -566,6 +587,7 @@ public class SessionPoolOptions {
       this.waitForMinSessions = options.waitForMinSessions;
       this.acquireSessionTimeout = options.acquireSessionTimeout;
       this.inactiveTransactionRemovalOptions = options.inactiveTransactionRemovalOptions;
+      this.anonymousSessionOptions = options.anonymousSessionOptions;
       this.poolMaintainerClock = options.poolMaintainerClock;
     }
 
@@ -626,6 +648,12 @@ public class SessionPoolOptions {
     Builder setInactiveTransactionRemovalOptions(
         InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions) {
       this.inactiveTransactionRemovalOptions = inactiveTransactionRemovalOptions;
+      return this;
+    }
+
+    Builder setAnonymousSessionOptions(
+        AnonymousSessionOptions anonymousSessionOptions) {
+      this.anonymousSessionOptions = anonymousSessionOptions;
       return this;
     }
 
@@ -721,6 +749,46 @@ public class SessionPoolOptions {
       this.inactiveTransactionRemovalOptions =
           InactiveTransactionRemovalOptions.newBuilder()
               .setActionOnInactiveTransaction(ActionOnInactiveTransaction.CLOSE)
+              .build();
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setAnonymousSessionsWithSingleSession() {
+      this.anonymousSessionOptions =
+          AnonymousSessionOptions.newBuilder()
+              .setActionForNumberOfAnonymousSessions(
+                  ActionForNumberOfAnonymousSessions.SINGLE_SESSION)
+              .build();
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setAnonymousSessionsWithMultipleSession() {
+      this.anonymousSessionOptions =
+          AnonymousSessionOptions.newBuilder()
+              .setActionForNumberOfAnonymousSessions(
+                  ActionForNumberOfAnonymousSessions.MULTI_SESSION)
+              .build();
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setAnonymousSessionsWithSingleChannel() {
+      this.anonymousSessionOptions =
+          AnonymousSessionOptions.newBuilder()
+              .setActionForAnonymousSessionsChannelHints(
+                  ActionForAnonymousSessionsChannelHints.SINGLE_CHANNEL)
+              .build();
+      return this;
+    }
+
+    @VisibleForTesting
+    Builder setAnonymousSessionsWithMultipleChannel() {
+      this.anonymousSessionOptions =
+          AnonymousSessionOptions.newBuilder()
+              .setActionForAnonymousSessionsChannelHints(
+                  ActionForAnonymousSessionsChannelHints.MULTI_CHANNEL)
               .build();
       return this;
     }

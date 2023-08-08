@@ -56,6 +56,11 @@ class DatabaseClientImpl implements DatabaseClient {
     return pool.getSession();
   }
 
+  @VisibleForTesting
+  PooledSessionFuture getRandomSharedSession() {
+    return pool.getRandomSharedSession();
+  }
+
   @Override
   public Dialect getDialect() {
     return pool.getDialect();
@@ -128,6 +133,16 @@ class DatabaseClientImpl implements DatabaseClient {
     Span span = tracer.spanBuilder(READ_ONLY_TRANSACTION).startSpan();
     try (Scope s = tracer.withSpan(span)) {
       return getSession().singleUse();
+    } catch (RuntimeException e) {
+      TraceUtil.endSpanWithFailure(span, e);
+      throw e;
+    }
+  }
+
+  public ReadContext singleUseWithSharedSession() {
+    Span span = tracer.spanBuilder(READ_ONLY_TRANSACTION).startSpan();
+    try (Scope s = tracer.withSpan(span)) {
+      return getRandomSharedSession().singleUse();
     } catch (RuntimeException e) {
       TraceUtil.endSpanWithFailure(span, e);
       throw e;
