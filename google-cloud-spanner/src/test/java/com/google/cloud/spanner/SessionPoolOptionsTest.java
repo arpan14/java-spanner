@@ -22,6 +22,9 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.google.cloud.spanner.SessionPoolOptions.ActionForAnonymousSessionsChannelHints;
+import com.google.cloud.spanner.SessionPoolOptions.ActionForNumberOfAnonymousSessions;
+import com.google.cloud.spanner.SessionPoolOptions.AnonymousSessionOptions;
 import com.google.cloud.spanner.SessionPoolOptions.InactiveTransactionRemovalOptions;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -188,6 +191,7 @@ public class SessionPoolOptionsTest {
   }
 
   @Test
+<<<<<<< HEAD
   public void setAcquireSessionTimeout() {
     SessionPoolOptions sessionPoolOptions1 =
         SessionPoolOptions.newBuilder().setAcquireSessionTimeout(Duration.ofSeconds(20)).build();
@@ -217,5 +221,36 @@ public class SessionPoolOptionsTest {
     SessionPoolOptions sessionPoolOptions = SessionPoolOptions.newBuilder().build();
 
     assertEquals(Duration.ofSeconds(60), sessionPoolOptions.getAcquireSessionTimeout());
+  }
+
+  @Test
+  public void verifyDefaultAnonymousSessionOptions() {
+    SessionPoolOptions sessionPoolOptions = SessionPoolOptions.newBuilder().build();
+    AnonymousSessionOptions anonymousSessionOptions =
+        AnonymousSessionOptions.newBuilder()
+            .setActionForAnonymousSessionsChannelHints(
+                ActionForAnonymousSessionsChannelHints.SINGLE_CHANNEL)
+            .setActionForNumberOfAnonymousSessions(
+                ActionForNumberOfAnonymousSessions.MULTI_SESSION).build();
+
+    assertTrue(sessionPoolOptions.isUseSingleChannelForRO());
+    assertTrue(sessionPoolOptions.isUseMultipleSessionsForRO());
+  }
+
+  @Test
+  public void verifyAnonymousSessionOptions() {
+    AnonymousSessionOptions anonymousSessionOptions =
+        AnonymousSessionOptions.newBuilder()
+            .setActionForAnonymousSessionsChannelHints(
+                ActionForAnonymousSessionsChannelHints.MULTI_CHANNEL)
+            .setActionForNumberOfAnonymousSessions(
+                ActionForNumberOfAnonymousSessions.SINGLE_SESSION).build();
+    SessionPoolOptions sessionPoolOptions =
+        SessionPoolOptions.newBuilder().setMaxSessions(100).setMinSessions(1)
+            .setAnonymousSessionOptions(anonymousSessionOptions).build();
+    assertFalse(sessionPoolOptions.isUseSingleChannelForRO());
+    assertFalse(sessionPoolOptions.isUseMultipleSessionsForRO());
+    assertTrue(sessionPoolOptions.isUseMultipleChannelForRO());
+    assertTrue(sessionPoolOptions.isUseSingleSessionForRO());
   }
 }
