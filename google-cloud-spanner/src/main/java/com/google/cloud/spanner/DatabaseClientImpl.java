@@ -57,8 +57,8 @@ class DatabaseClientImpl implements DatabaseClient {
   }
 
   @VisibleForTesting
-  PooledSessionFuture getRandomSharedSession() {
-    return pool.getRandomSharedSession();
+  Session getRandomSharedSession() {
+    return pool.getRandomSharedSessionV2();
   }
 
   @Override
