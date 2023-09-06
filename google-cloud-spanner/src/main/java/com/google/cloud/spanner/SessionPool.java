@@ -2529,6 +2529,8 @@ class SessionPool {
           sessions.addFirst(session);
         }
       } else {
+        // TODO : this can result in edge cases when session is already shared
+        // we can only unblock the reader threads by this mechanism and not any writer threads
         waiters.poll().put(session);
       }
     }
