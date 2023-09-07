@@ -2512,6 +2512,7 @@ class SessionPool {
    * @throws SpannerException
    */
   Session getRandomSharedSessionV2() throws SpannerException {
+    // TODO use a session pool configuration and combine this with getSession() method.
     synchronized (lock) {
       int randomIndex = random.nextInt(sessions.size());
       return sessions.get(randomIndex);
