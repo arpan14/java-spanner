@@ -32,6 +32,8 @@ public class SessionPoolOptions {
   private static final ActionOnExhaustion DEFAULT_ACTION = ActionOnExhaustion.BLOCK;
   private final int minSessions;
   private final int maxSessions;
+
+  private final int sharedSessionsCount;
   private final int incStep;
   /**
    * Use {@link #minSessions} instead to set the minimum number of sessions in the pool to maintain.
@@ -75,6 +77,7 @@ public class SessionPoolOptions {
     // maxSessions value is less than the default for minSessions.
     this.minSessions = Math.min(builder.minSessions, builder.maxSessions);
     this.maxSessions = builder.maxSessions;
+    this.sharedSessionsCount = builder.sharedSessionsCount;
     this.incStep = builder.incStep;
     this.maxIdleSessions = builder.maxIdleSessions;
     this.writeSessionsFraction = builder.writeSessionsFraction;
@@ -103,6 +106,7 @@ public class SessionPoolOptions {
     SessionPoolOptions other = (SessionPoolOptions) o;
     return Objects.equals(this.minSessions, other.minSessions)
         && Objects.equals(this.maxSessions, other.maxSessions)
+        && Objects.equals(this.sharedSessionsCount, other.sharedSessionsCount)
         && Objects.equals(this.incStep, other.incStep)
         && Objects.equals(this.maxIdleSessions, other.maxIdleSessions)
         && Objects.equals(this.writeSessionsFraction, other.writeSessionsFraction)
@@ -130,6 +134,7 @@ public class SessionPoolOptions {
     return Objects.hash(
         this.minSessions,
         this.maxSessions,
+        this.sharedSessionsCount,
         this.incStep,
         this.maxIdleSessions,
         this.writeSessionsFraction,
@@ -159,6 +164,10 @@ public class SessionPoolOptions {
 
   public int getMaxSessions() {
     return maxSessions;
+  }
+
+  public int getSharedSessionCount() {
+    return sharedSessionsCount;
   }
 
   int getIncStep() {
@@ -516,6 +525,8 @@ public class SessionPoolOptions {
     private boolean minSessionsSet = false;
     private int minSessions = DEFAULT_MIN_SESSIONS;
     private int maxSessions = DEFAULT_MAX_SESSIONS;
+
+    private int sharedSessionsCount = 4;
     private int incStep = DEFAULT_INC_STEP;
 
     /** Set a higher value for {@link #minSessions} instead of using this field. */
@@ -577,6 +588,7 @@ public class SessionPoolOptions {
       this.minSessionsSet = true;
       this.minSessions = options.minSessions;
       this.maxSessions = options.maxSessions;
+      this.sharedSessionsCount = options.sharedSessionsCount;
       this.incStep = options.incStep;
       this.maxIdleSessions = options.maxIdleSessions;
       this.writeSessionsFraction = options.writeSessionsFraction;
