@@ -1406,6 +1406,13 @@ class SessionPool {
     }
 
     @Override
+    public ServerStream<BatchWriteResponse> batchWriteAtLeastOnce(
+        Iterable<MutationGroup> mutationGroups, TransactionOption... options)
+        throws SpannerException {
+      throw UNIMPLEMENTED.asRuntimeException();
+    }
+
+    @Override
     public ReadContext singleUse() {
       return delegate.singleUse();
     }

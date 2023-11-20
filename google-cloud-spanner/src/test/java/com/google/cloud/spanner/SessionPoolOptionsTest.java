@@ -191,7 +191,6 @@ public class SessionPoolOptionsTest {
   }
 
   @Test
-<<<<<<< HEAD
   public void setAcquireSessionTimeout() {
     SessionPoolOptions sessionPoolOptions1 =
         SessionPoolOptions.newBuilder().setAcquireSessionTimeout(Duration.ofSeconds(20)).build();
