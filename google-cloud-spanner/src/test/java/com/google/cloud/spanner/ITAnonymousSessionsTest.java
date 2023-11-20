@@ -64,7 +64,10 @@ public class ITAnonymousSessionsTest {
     spanner = options.getService();
     databaseAdminClient = spanner.getDatabaseAdminClient();
     client = spanner.getDatabaseClient(DatabaseId.of("span-cloud-testing",
-        "arpanmishra-dev-span", "anonymous-sessions"));
+        "arpan-test-us-west", "anonymous-sessions"));
+    // for cross-region, uncomment below config
+    // client = spanner.getDatabaseClient(DatabaseId.of("span-cloud-testing",
+    //         "arpanmishra-test-eu", "anonymous-sessions"));
   }
 
   @AfterClass
