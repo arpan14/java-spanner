@@ -225,6 +225,31 @@ class SessionClient implements AutoCloseable {
   }
 
   /**
+   * Create a multiplexed session. These sessions are not affiliated with any GRPC channel.
+   */
+  SessionImpl createMultiplexedSession() {
+    final Map<SpannerRpc.Option, ?> options = optionMap();
+    ISpan span = spanner.getTracer().spanBuilder(SpannerImpl.CREATE_SESSION);
+    try (IScope s = spanner.getTracer().withSpan(span)) {
+      com.google.spanner.v1.Session session =
+          spanner
+              .getRpc()
+              .createSession(
+                  db.getName(),
+                  spanner.getOptions().getDatabaseRole(),
+                  spanner.getOptions().getSessionLabels(),
+                  optionMap(),
+                  true);
+      return new SessionImpl(spanner, session.getName(), options);
+    } catch (RuntimeException e) {
+      span.setStatus(e);
+      throw e;
+    } finally {
+      span.end();
+    }
+  }
+
+  /**
    * Asynchronously creates a batch of sessions and returns these to the given {@link
    * SessionConsumer}. This method may split the actual session creation over several gRPC calls in
    * order to distribute the sessions evenly over all available channels and to parallelize the
