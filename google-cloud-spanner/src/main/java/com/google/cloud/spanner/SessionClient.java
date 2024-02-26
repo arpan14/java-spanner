@@ -229,7 +229,7 @@ class SessionClient implements AutoCloseable {
    */
   SessionImpl createMultiplexedSession() {
     final Map<SpannerRpc.Option, ?> options = optionMap();
-    ISpan span = spanner.getTracer().spanBuilder(SpannerImpl.CREATE_SESSION);
+    ISpan span = spanner.getTracer().spanBuilder(SpannerImpl.CREATE_MULTIPLEXED_SESSION);
     try (IScope s = spanner.getTracer().withSpan(span)) {
       com.google.spanner.v1.Session session =
           spanner
