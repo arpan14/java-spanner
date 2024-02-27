@@ -1484,13 +1484,13 @@ class SessionPool {
     @Override
     public ReadOnlyTransaction readOnlyTransaction() {
       throw SpannerExceptionFactory.newSpannerException(
-          ErrorCode.UNIMPLEMENTED, "Unsupported operation");
+          ErrorCode.UNIMPLEMENTED, "Unimplemented with Multiplexed Session");
     }
 
     @Override
     public ReadOnlyTransaction readOnlyTransaction(TimestampBound bound) {
       throw SpannerExceptionFactory.newSpannerException(
-          ErrorCode.UNIMPLEMENTED, "Unsupported operation");
+          ErrorCode.UNIMPLEMENTED, "Unimplemented with Multiplexed Session");
     }
 
     @Override
@@ -2599,15 +2599,19 @@ class SessionPool {
     }
   }
 
+  /**
+   * Returns a multiplexed session.
+   *
+   * @return
+   * @throws SpannerException
+   */
   PooledSessionFuture getMultiplexedSession() throws SpannerException {
     try {
       multiplexedSessionsInitialized.await();
     } catch (InterruptedException interruptedException) {
       throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
     }
-    int index = MultiplexedSession.SESSION_COUNTER.getAndIncrement();
     ISpan span = tracer.getCurrentSpan();
-    ;
     synchronized (lock) {
       MultiplexedSession session = multiplexedSessions.get(multiplexedSessions.size() - 1);
       return createPooledSessionFuture(Futures.immediateFuture(session), span);
