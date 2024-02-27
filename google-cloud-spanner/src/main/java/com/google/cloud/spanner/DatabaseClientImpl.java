@@ -52,6 +52,11 @@ class DatabaseClientImpl implements DatabaseClient {
     return pool.getSession();
   }
 
+  @VisibleForTesting
+  PooledSessionFuture getMultiplexedSession() {
+    return pool.getMultiplexedSession();
+  }
+
   @Override
   public Dialect getDialect() {
     return pool.getDialect();
@@ -135,7 +140,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadContext singleUse(TimestampBound bound) {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession().singleUse(bound);
+      return getMultiplexedSession().singleUse(bound);
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
