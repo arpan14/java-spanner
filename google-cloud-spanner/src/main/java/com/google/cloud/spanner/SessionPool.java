@@ -3018,7 +3018,7 @@ class SessionPool {
     logger.log(Level.FINE, String.format("Creating multiplexed sessions"));
     synchronized (lock) {
       try {
-        sessionClient.createMultiplexedSession();
+        sessionClient.createMultiplexedSession(multiplexedSessionConsumer);
       } catch (Throwable t) {
         handleMultiplexedSessionsFailure(newSpannerException(t));
       }
@@ -3051,7 +3051,7 @@ class SessionPool {
 
     @Override
     public void onSessionReady(SessionImpl session) {
-      MultiplexedSession multiplexedSession = new MultiplexedSession(session);
+      final MultiplexedSession multiplexedSession = new MultiplexedSession(session);
       synchronized (lock) {
         multiplexedSessions.add(multiplexedSession);
       }
