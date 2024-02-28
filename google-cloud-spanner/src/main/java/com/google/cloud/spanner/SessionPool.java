@@ -3159,7 +3159,7 @@ class SessionPool {
 
     @Override
     public void onSessionReady(SessionImpl session) {
-      MultiplexedSession multiplexedSession = new MultiplexedSession(session);
+      final MultiplexedSession multiplexedSession = new MultiplexedSession(session);
       synchronized (lock) {
         multiplexedSessions.add(multiplexedSession);
       }
