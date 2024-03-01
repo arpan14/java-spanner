@@ -423,7 +423,8 @@ class SessionPool {
         while (true) {
           try {
             synchronized (lock) {
-              session.get().markUsed();
+              CachedSession cachedSession = session.get();
+              cachedSession.markUsed();
             }
             return getReadContextDelegate().readRow(table, key, columns);
           } catch (SessionNotFoundException e) {
@@ -1416,7 +1417,9 @@ class SessionPool {
             incrementNumSessionsInUse();
             checkedOutSessions.add(this);
           }
-          ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
+          // TODO : see how this can be fixed and we don't run into exception
+          // TODO : why should this even run for multiplexed session ?
+          // ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
         }
         initialized.countDown();
       }
@@ -1542,14 +1545,12 @@ class SessionPool {
 
     @Override
     public ReadOnlyTransaction readOnlyTransaction() {
-      throw SpannerExceptionFactory.newSpannerException(
-          ErrorCode.UNIMPLEMENTED, "Unimplemented with Multiplexed Session");
+      return delegate.readOnlyTransaction();
     }
 
     @Override
     public ReadOnlyTransaction readOnlyTransaction(TimestampBound bound) {
-      throw SpannerExceptionFactory.newSpannerException(
-          ErrorCode.UNIMPLEMENTED, "Unimplemented with Multiplexed Session");
+      return delegate.readOnlyTransaction(bound);
     }
 
     @Override
@@ -1595,7 +1596,7 @@ class SessionPool {
 
     @Override
     public void close() {
-      asyncClose();
+      SESSION_COUNTER.decrementAndGet();
     }
 
     private final ApiFuture<Empty> CLOSE_RESULT =
@@ -1603,8 +1604,8 @@ class SessionPool {
 
     @Override
     public ApiFuture<Empty> asyncClose() {
-      SESSION_COUNTER.decrementAndGet();
-      return CLOSE_RESULT;
+      close();
+      return ApiFutures.immediateFuture(Empty.getDefaultInstance());
     }
   }
 
