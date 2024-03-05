@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2017 Google LLC
  *
@@ -50,7 +49,7 @@ public class ITMultiplexedSessionsTest {
   @ClassRule public static IntegrationTestEnv env = new IntegrationTestEnv();
   private static final String TABLE_NAME = "TestTable";
   private static final List<String> ALL_COLUMNS = Arrays.asList("Key", "StringValue");
-  private static DatabaseClient googleStandardSQLClient;
+  private static DatabaseClient client;
 
   @BeforeClass
   public static void setUpDatabase() {
@@ -63,7 +62,7 @@ public class ITMultiplexedSessionsTest {
                     + ") PRIMARY KEY (key)",
                 "CREATE INDEX TestTableByValue ON TestTable(stringvalue)",
                 "CREATE INDEX TestTableByValueDesc ON TestTable(stringvalue DESC)");
-    googleStandardSQLClient = env.getTestHelper().getDatabaseClient(googleStandardSQLDatabase);
+    client = env.getTestHelper().getDatabaseClient(googleStandardSQLDatabase);
 
     // Includes k0..k14.  Note that strings k{10,14} sort between k1 and k2.
     List<Mutation> mutations = new ArrayList<>();
@@ -76,7 +75,7 @@ public class ITMultiplexedSessionsTest {
               .to("v" + i)
               .build());
     }
-    googleStandardSQLClient.write(mutations);
+    client.write(mutations);
   }
 
   @AfterClass
@@ -87,7 +86,7 @@ public class ITMultiplexedSessionsTest {
   @Test
   public void pointRead() {
     Struct row =
-        googleStandardSQLClient.singleUse(TimestampBound.strong())
+        client.singleUse(TimestampBound.strong())
             .readRow(TABLE_NAME, Key.of("k1"), ALL_COLUMNS);
     assertThat(row).isNotNull();
     assertThat(row.getString(0)).isEqualTo("k1");

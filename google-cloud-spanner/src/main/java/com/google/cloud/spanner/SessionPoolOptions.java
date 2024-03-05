@@ -67,6 +67,7 @@ public class SessionPoolOptions {
 
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
+
   private final boolean useMultiplexedSession;
 
   private SessionPoolOptions(Builder builder) {
@@ -664,7 +665,6 @@ public class SessionPoolOptions {
     }
 
     /**
-     *
      * @param useMultiplexedSession
      * @return
      */

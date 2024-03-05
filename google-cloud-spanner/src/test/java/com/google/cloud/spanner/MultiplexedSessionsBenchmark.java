@@ -46,7 +46,7 @@ import org.openjdk.jmh.annotations.Warmup;
 /**
  * Benchmarks for measuring existing latencies of various APIs using the Java Client. The benchmarks
  * are bound to the Maven profile `benchmark` and can be executed like this: <code>
- *   mvn clean test -DskipTests -Pbenchmark -Dbenchmark.name=DefaultBenchmark
+ *   mvn clean test -DskipTests -Pbenchmark -Dbenchmark.name=MultiplexedSessionsBenchmark
  * </code> Test Table Schema :
  *
  * <p>CREATE TABLE FOO ( id INT64 NOT NULL, BAZ INT64, BAR INT64, ) PRIMARY KEY(id);
@@ -64,7 +64,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(batchSize = 1, iterations = 1, timeUnit = TimeUnit.MILLISECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 1)
-public class DefaultBenchmark extends AbstractLatencyBenchmark {
+public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
 
   private static final String SELECT_QUERY = "SELECT ID FROM FOO WHERE ID = @id";
   private static final String UPDATE_QUERY = "UPDATE FOO SET BAR=1 WHERE ID = @id";
@@ -75,7 +75,7 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
    * scenario, using 1 thread means there will be 1 request. Use a value > 1 to have concurrent
    * requests.
    */
-  private static final int PARALLEL_THREADS = 1;
+  private static final int PARALLEL_THREADS = 10;
 
   /**
    * Total number of reads per test run for 1 thread. Increasing the value here will increase the
@@ -83,13 +83,6 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
    * will be 400 read requests (200 on each thread).
    */
   private static final int TOTAL_READS_PER_RUN = 12000;
-
-  /**
-   * Total number of writes per test run for 1 thread. Increasing the value here will increase the
-   * duration of the benchmark. For ex - With PARALLEL_THREADS = 2, TOTAL_WRITES_PER_RUN = 200,
-   * there will be 400 write requests (200 on each thread).
-   */
-  private static final int TOTAL_WRITES_PER_RUN = 4000;
 
   /**
    * Number of requests which are used to initialise/warmup the benchmark. The latency number of
@@ -122,6 +115,7 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
               .setSessionPoolOption(
                   SessionPoolOptions.newBuilder()
                       .setWaitForMinSessions(org.threeten.bp.Duration.ofSeconds(20))
+                      .setUseMultiplexedSession(true)
                       .build())
               .setHost(SERVER_URL)
               .build();
@@ -155,45 +149,6 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
     collectResultsAndPrint(service, results, TOTAL_READS_PER_RUN);
   }
 
-  /** Measures the time needed to execute a burst of read and write requests. */
-  @Benchmark
-  public void burstQueriesAndWrites(final BenchmarkState server) throws Exception {
-    final DatabaseClientImpl client = server.client;
-    SessionPool pool = client.pool;
-    assertThat(pool.totalSessions())
-        .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
-
-    ListeningScheduledExecutorService service =
-        MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
-    List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS);
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(service.submit(() -> runBenchmarksForQueries(server, TOTAL_READS_PER_RUN)));
-    }
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(service.submit(() -> runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN)));
-    }
-
-    collectResultsAndPrint(service, results, TOTAL_READS_PER_RUN + TOTAL_WRITES_PER_RUN);
-  }
-
-  /** Measures the time needed to execute a burst of read and write requests. */
-  @Benchmark
-  public void burstUpdates(final BenchmarkState server) throws Exception {
-    final DatabaseClientImpl client = server.client;
-    SessionPool pool = client.pool;
-    assertThat(pool.totalSessions())
-        .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
-
-    ListeningScheduledExecutorService service =
-        MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
-    List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS);
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(service.submit(() -> runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN)));
-    }
-
-    collectResultsAndPrint(service, results, TOTAL_WRITES_PER_RUN);
-  }
-
   private List<java.time.Duration> runBenchmarksForQueries(
       final BenchmarkState server, int numberOfOperations) {
     List<Duration> results = new ArrayList<>(numberOfOperations);
@@ -223,38 +178,9 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
     return watch.elapsed();
   }
 
-  private List<java.time.Duration> runBenchmarkForUpdates(
-      final BenchmarkState server, int numberOfOperations) {
-    List<Duration> results = new ArrayList<>(numberOfOperations);
-    // Execute one query to make sure everything has been warmed up.
-    executeWarmup(server);
-
-    // Execute one update to make sure everything has been warmed up.
-    executeUpdate(server);
-
-    for (int i = 0; i < numberOfOperations; i++) {
-      results.add(executeUpdate(server));
-    }
-    return results;
-  }
-
-  private Duration executeUpdate(final BenchmarkState server) {
-    Stopwatch watch = Stopwatch.createStarted();
-
-    TransactionRunner runner = server.client.readWriteTransaction();
-    runner.run(transaction -> transaction.executeUpdate(getRandomisedUpdateStatement()));
-
-    return watch.elapsed();
-  }
-
   static Statement getRandomisedReadStatement() {
     int randomKey = ThreadLocalRandom.current().nextInt(TOTAL_RECORDS);
     return Statement.newBuilder(SELECT_QUERY).bind(ID_COLUMN_NAME).to(randomKey).build();
-  }
-
-  static Statement getRandomisedUpdateStatement() {
-    int randomKey = ThreadLocalRandom.current().nextInt(TOTAL_RECORDS);
-    return Statement.newBuilder(UPDATE_QUERY).bind(ID_COLUMN_NAME).to(randomKey).build();
   }
 
   void collectResultsAndPrint(

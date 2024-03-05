@@ -229,8 +229,7 @@ public class SessionPoolOptionsTest {
   @Test
   public void verifySetUseMultiplexedSession() {
     SessionPoolOptions sessionPoolOptions =
-        SessionPoolOptions.newBuilder()
-            .setUseMultiplexedSession(true).build();
+        SessionPoolOptions.newBuilder().setUseMultiplexedSession(true).build();
 
     assertEquals(true, sessionPoolOptions.getUseMultiplexedSession());
   }
