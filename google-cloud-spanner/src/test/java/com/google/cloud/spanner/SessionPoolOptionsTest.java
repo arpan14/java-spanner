@@ -218,4 +218,20 @@ public class SessionPoolOptionsTest {
 
     assertEquals(Duration.ofSeconds(60), sessionPoolOptions.getAcquireSessionTimeout());
   }
+
+  @Test
+  public void verifyDefaultUseMultiplexedSession() {
+    SessionPoolOptions sessionPoolOptions = SessionPoolOptions.newBuilder().build();
+
+    assertEquals(false, sessionPoolOptions.getUseMultiplexedSession());
+  }
+
+  @Test
+  public void verifySetUseMultiplexedSession() {
+    SessionPoolOptions sessionPoolOptions =
+        SessionPoolOptions.newBuilder()
+            .setUseMultiplexedSession(true).build();
+
+    assertEquals(true, sessionPoolOptions.getUseMultiplexedSession());
+  }
 }

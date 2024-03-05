@@ -67,6 +67,7 @@ public class SessionPoolOptions {
 
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
+  private final boolean useMultiplexedSession;
 
   private SessionPoolOptions(Builder builder) {
     // minSessions > maxSessions is only possible if the user has only set a value for maxSessions.
@@ -91,6 +92,7 @@ public class SessionPoolOptions {
     this.releaseToPosition = builder.releaseToPosition;
     this.inactiveTransactionRemovalOptions = builder.inactiveTransactionRemovalOptions;
     this.poolMaintainerClock = builder.poolMaintainerClock;
+    this.useMultiplexedSession = builder.useMultiplexedSession;
   }
 
   @Override
@@ -120,7 +122,8 @@ public class SessionPoolOptions {
         && Objects.equals(this.releaseToPosition, other.releaseToPosition)
         && Objects.equals(
             this.inactiveTransactionRemovalOptions, other.inactiveTransactionRemovalOptions)
-        && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock);
+        && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock)
+        && Objects.equals(this.useMultiplexedSession, other.useMultiplexedSession);
   }
 
   @Override
@@ -144,7 +147,8 @@ public class SessionPoolOptions {
         this.acquireSessionTimeout,
         this.releaseToPosition,
         this.inactiveTransactionRemovalOptions,
-        this.poolMaintainerClock);
+        this.poolMaintainerClock,
+        this.useMultiplexedSession);
   }
 
   public Builder toBuilder() {
@@ -261,6 +265,11 @@ public class SessionPoolOptions {
 
   Position getReleaseToPosition() {
     return releaseToPosition;
+  }
+
+  @VisibleForTesting
+  boolean getUseMultiplexedSession() {
+    return useMultiplexedSession;
   }
 
   public static Builder newBuilder() {
@@ -451,6 +460,7 @@ public class SessionPoolOptions {
     private Duration waitForMinSessions = Duration.ZERO;
     private Duration acquireSessionTimeout = Duration.ofSeconds(60);
     private Position releaseToPosition = getReleaseToPositionFromSystemProperty();
+    private boolean useMultiplexedSession = false;
 
     private Clock poolMaintainerClock;
 
@@ -650,6 +660,16 @@ public class SessionPoolOptions {
     @VisibleForTesting
     Builder setPoolMaintainerClock(Clock poolMaintainerClock) {
       this.poolMaintainerClock = poolMaintainerClock;
+      return this;
+    }
+
+    /**
+     *
+     * @param useMultiplexedSession
+     * @return
+     */
+    public Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
+      this.useMultiplexedSession = useMultiplexedSession;
       return this;
     }
 
