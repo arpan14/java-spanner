@@ -68,9 +68,9 @@ public class SessionPoolOptions {
 
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
+  private final boolean useMultiplexedSession;
 
   private final Duration waitForMultiplexedSession;
-  private final boolean useMultiplexedSession;
   private final Duration multiplexedSessionMaintenanceDuration;
 
   private SessionPoolOptions(Builder builder) {
@@ -492,7 +492,6 @@ public class SessionPoolOptions {
      * which means that the option is disabled.
      */
     private long randomizePositionQPSThreshold = 0L;
-
     private boolean useMultiplexedSession = false;
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
     private Duration waitForMultiplexedSession = Duration.ofSeconds(10);
