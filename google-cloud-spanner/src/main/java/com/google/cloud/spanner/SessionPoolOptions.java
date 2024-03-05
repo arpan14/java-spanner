@@ -68,6 +68,7 @@ public class SessionPoolOptions {
 
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
+
   private final boolean useMultiplexedSession;
 
   private final Duration waitForMultiplexedSession;
@@ -698,6 +699,7 @@ public class SessionPoolOptions {
     }
 
     /**
+<<<<<<< HEAD
      * Sets whether the client should use multiplexed session or not. If set to true, the client
      * optimises and runs multiple applicable requests concurrently on a single session. A single
      * multiplexed session is sufficient to handle all concurrent traffic.
@@ -707,6 +709,10 @@ public class SessionPoolOptions {
      * making use of {@link SessionPoolOptions#minSessions} and {@link
      * SessionPoolOptions#maxSessions} based on the traffic load. Failing to do so will result in
      * higher latencies.
+=======
+     * @param useMultiplexedSession
+     * @return
+>>>>>>> 79bef824c (chore: add a benchmark for multiplexed session.)
      */
     Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
       this.useMultiplexedSession = useMultiplexedSession;
