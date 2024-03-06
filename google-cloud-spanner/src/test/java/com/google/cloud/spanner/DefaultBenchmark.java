@@ -37,6 +37,7 @@ import org.openjdk.jmh.annotations.Level;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
@@ -115,12 +116,20 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
     private Spanner spanner;
     private DatabaseClientImpl client;
 
+    @Param({"100"})
+    int minSessions;
+
+    @Param({"400"})
+    int maxSessions;
+
     @Setup(Level.Iteration)
     public void setup() throws Exception {
       SpannerOptions options =
           SpannerOptions.newBuilder()
               .setSessionPoolOption(
                   SessionPoolOptions.newBuilder()
+                      .setMinSessions(minSessions)
+                      .setMaxSessions(maxSessions)
                       .setWaitForMinSessions(org.threeten.bp.Duration.ofSeconds(20))
                       .build())
               .setHost(SERVER_URL)
