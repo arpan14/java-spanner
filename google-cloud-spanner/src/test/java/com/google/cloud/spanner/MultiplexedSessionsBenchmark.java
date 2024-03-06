@@ -67,7 +67,6 @@ import org.openjdk.jmh.annotations.Warmup;
 public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
 
   private static final String SELECT_QUERY = "SELECT ID FROM FOO WHERE ID = @id";
-  private static final String UPDATE_QUERY = "UPDATE FOO SET BAR=1 WHERE ID = @id";
   private static final String ID_COLUMN_NAME = "id";
 
   /**
