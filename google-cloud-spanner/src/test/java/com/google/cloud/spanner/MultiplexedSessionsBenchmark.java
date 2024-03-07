@@ -75,7 +75,7 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
    * scenario, using 1 thread means there will be 1 request. Use a value > 1 to have concurrent
    * requests.
    */
-  private static final int PARALLEL_THREADS = 30;
+  private static final int PARALLEL_THREADS = 70;
 
   /**
    * Total number of reads per test run for 1 thread. Increasing the value here will increase the
