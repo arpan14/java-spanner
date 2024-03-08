@@ -67,44 +67,6 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 1)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
-  private static final String SELECT_QUERY = "SELECT ID FROM FOO WHERE ID = @id";
-  private static final String UPDATE_QUERY = "UPDATE FOO SET BAR=1 WHERE ID = @id";
-  private static final String ID_COLUMN_NAME = "id";
-
-  /**
-   * Used to determine how many concurrent requests are allowed. For ex - To simulate a low QPS
-   * scenario, using 1 thread means there will be 1 request. Use a value > 1 to have concurrent
-   * requests.
-   */
-  private static final int PARALLEL_THREADS = 70;
-
-  /**
-   * Total number of reads per test run for 1 thread. Increasing the value here will increase the
-   * duration of the benchmark. For ex - With PARALLEL_THREADS = 2, TOTAL_READS_PER_RUN = 200, there
-   * will be 400 read requests (200 on each thread).
-   */
-  private static final int TOTAL_READS_PER_RUN = 12000;
-
-  /**
-   * Total number of writes per test run for 1 thread. Increasing the value here will increase the
-   * duration of the benchmark. For ex - With PARALLEL_THREADS = 2, TOTAL_WRITES_PER_RUN = 200,
-   * there will be 400 write requests (200 on each thread).
-   */
-  private static final int TOTAL_WRITES_PER_RUN = 4000;
-
-  /**
-   * Number of requests which are used to initialise/warmup the benchmark. The latency number of
-   * these runs are ignored from the final reported results.
-   */
-  private static final int WARMUP_REQUEST_COUNT = 1;
-
-  /**
-   * Numbers of records in the sample table used in the benchmark. This is used in this benchmark to
-   * randomly choose a primary key and ensure that the reads are randomly distributed. This is done
-   * to ensure we don't end up reading/writing the same table record (leading to hot-spotting).
-   */
-  private static final int TOTAL_RECORDS = 1000000;
-
   @State(Scope.Thread)
   @AuxCounters(org.openjdk.jmh.annotations.AuxCounters.Type.EVENTS)
   public static class BenchmarkState {
