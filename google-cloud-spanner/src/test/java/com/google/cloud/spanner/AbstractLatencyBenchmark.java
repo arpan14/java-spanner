@@ -64,10 +64,10 @@ public abstract class AbstractLatencyBenchmark {
     Collections.sort(orderedResults);
     System.out.println();
     System.out.printf("Total number of queries: %d\n", orderedResults.size());
-    System.out.printf("Avg: %fs\n", avg(results));
-    System.out.printf("P50: %fs\n", percentile(50, orderedResults));
-    System.out.printf("P95: %fs\n", percentile(95, orderedResults));
-    System.out.printf("P99: %fs\n", percentile(99, orderedResults));
+    System.out.printf("Avg: %fms\n", avg(results));
+    System.out.printf("P50: %fms\n", percentile(50, orderedResults));
+    System.out.printf("P95: %fms\n", percentile(95, orderedResults));
+    System.out.printf("P99: %fms\n", percentile(99, orderedResults));
   }
 
   private double percentile(int percentile, List<Duration> orderedResults) {
