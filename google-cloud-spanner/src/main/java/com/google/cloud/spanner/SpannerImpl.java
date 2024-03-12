@@ -175,12 +175,6 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
     return asyncExecutorProvider;
   }
 
-  SessionImpl sessionWithId(String name) {
-    Preconditions.checkArgument(!Strings.isNullOrEmpty(name), "name is null or empty");
-    SessionId id = SessionId.of(name);
-    return getSessionClient(id.getDatabaseId()).sessionWithId(name);
-  }
-
   void checkClosed() {
     synchronized (this) {
       if (closedException != null) {

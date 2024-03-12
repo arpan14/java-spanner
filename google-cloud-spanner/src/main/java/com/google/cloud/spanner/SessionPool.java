@@ -2246,6 +2246,39 @@ class SessionPool {
         }
       }
     }
+
+
+    void maintainMultiplexedSession(Instant currentTime) {
+      try {
+        Iterator<MultiplexedSession> iterator = multiplexedSessions.iterator();
+        while (iterator.hasNext()) {
+          final MultiplexedSession session = iterator.next();
+          final Duration durationFromCreationTime =
+              Duration.between(session.getDelegate().getCreateTime(), currentTime);
+          if (durationFromCreationTime.compareTo(
+              inactiveTransactionRemovalOptions.getIdleTimeThreshold())
+              > 0) {
+
+        }
+
+
+        final InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions =
+            options.getInactiveTransactionRemovalOptions();
+        final Instant minExecutionTime =
+            lastExecutionTime.plus(inactiveTransactionRemovalOptions.getExecutionFrequency());
+        if (currentTime.isBefore(minExecutionTime)) {
+          return;
+        }
+        lastExecutionTime = currentTime; // update this only after we have decided to execute task
+        if (options.closeInactiveTransactions()
+            || options.warnInactiveTransactions()
+            || options.warnAndCloseInactiveTransactions()) {
+
+        }
+      } catch (final Throwable t) {
+        logger.log(Level.WARNING, "Failed to maintain multiplexed session", t);
+      }
+    }
   }
 
   enum Position {
