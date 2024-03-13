@@ -904,8 +904,8 @@ class SessionPool {
         Tuple<CachedSession, SpannerException> tuple =
             sessionNotFoundHandler.handleSessionNotFound(e);
         this.delegate = tuple.x().transactionManager(options);
-      } finally {
         restartedAfterSessionNotFound = true;
+      } finally {
         if (getState() != TransactionState.ABORTED) {
           close();
         }
