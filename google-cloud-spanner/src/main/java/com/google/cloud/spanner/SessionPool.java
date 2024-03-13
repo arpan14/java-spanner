@@ -179,7 +179,6 @@ class SessionPool {
      * releases its session back into the pool.
      */
     private class AutoClosingReadContextAsyncResultSetImpl extends AsyncResultSetImpl {
-
       private AutoClosingReadContextAsyncResultSetImpl(
           ExecutorProvider executorProvider, ResultSet delegate, int bufferRows) {
         super(executorProvider, delegate, bufferRows);
@@ -240,6 +239,7 @@ class SessionPool {
       this.sessionReplacementHandler = sessionReplacementHandler;
       this.session = session;
       this.isSingleUse = isSingleUse;
+      this.sessionNotFoundHandler = sessionNotFoundHandler;
     }
 
     T getReadContextDelegate() {
@@ -289,7 +289,11 @@ class SessionPool {
             boolean ret = super.next();
             if (beforeFirst) {
               synchronized (lock) {
-                session.get().markUsed();
+                try {
+                  session.get().markUsed();
+                } catch (ExecutionException | InterruptedException e) {
+                  // this will never be thrown
+                }
                 beforeFirst = false;
                 sessionUsedForQuery = true;
               }
@@ -303,7 +307,11 @@ class SessionPool {
           } catch (SpannerException e) {
             synchronized (lock) {
               if (!closed && isSingleUse) {
-                session.get().setLastException(e);
+                try {
+                  session.get().setLastException(e);
+                } catch (InterruptedException | ExecutionException ex) {
+                  // this will never be thrown
+                }
                 AutoClosingReadContext.this.close();
               }
             }
@@ -428,6 +436,8 @@ class SessionPool {
             return getReadContextDelegate().readRow(table, key, columns);
           } catch (SessionNotFoundException e) {
             replaceSessionIfPossible(e);
+          } catch (InterruptedException | ExecutionException e) {
+            // this exception is never thrown
           }
         }
       } finally {
@@ -459,6 +469,8 @@ class SessionPool {
             return getReadContextDelegate().readRowUsingIndex(table, index, key, columns);
           } catch (SessionNotFoundException e) {
             replaceSessionIfPossible(e);
+          } catch (ExecutionException | InterruptedException e) {
+            // this exception is never thrown
           }
         }
       } finally {
@@ -532,7 +544,7 @@ class SessionPool {
           if (readContextDelegate != null) {
             readContextDelegate.close();
           }
-          session.close();
+          ((Session) session).close();
           delegateClosed = true;
         }
       }
@@ -1311,7 +1323,12 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
+              CachedSession ps = null;
+              try {
+                ps = session.get();
+              } catch (InterruptedException | ExecutionException e) {
+                // this will never be thrown
+              }
               return ps.getDelegate().singleUse();
             },
             SessionPool.this,
@@ -1329,7 +1346,12 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
+              CachedSession ps = null;
+              try {
+                ps = session.get();
+              } catch (InterruptedException | ExecutionException e) {
+                // this will never be thrown
+              }
               return ps.getDelegate().singleUse(bound);
             },
             SessionPool.this,
@@ -1346,7 +1368,12 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().singleUseReadOnlyTransaction();
           },
           true);
@@ -1356,7 +1383,12 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().singleUseReadOnlyTransaction(bound);
           },
           true);
@@ -1366,7 +1398,12 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().readOnlyTransaction();
           },
           false);
@@ -1376,14 +1413,19 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will not be thrown
+            }
             return ps.getDelegate().readOnlyTransaction(bound);
           },
           false);
     }
 
     private ReadOnlyTransaction internalReadOnlyTransaction(
-        Function<PooledSessionFuture, ReadOnlyTransaction> transactionSupplier,
+        Function<SessionFuture, ReadOnlyTransaction> transactionSupplier,
         boolean isSingleUse) {
       try {
         return new AutoClosingReadTransaction<>(
@@ -1569,7 +1611,12 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
+              CachedSession ps = null;
+              try {
+                ps = session.get();
+              } catch (InterruptedException | ExecutionException e) {
+                // this will never be thrown
+              }
               return ps.getDelegate().singleUse();
             },
             SessionPool.this,
@@ -1586,7 +1633,12 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
+              CachedSession ps = null;
+              try {
+                ps = session.get();
+              } catch (InterruptedException | ExecutionException e) {
+                // this will never be thrown
+              }
               return ps.getDelegate().singleUse(bound);
             },
             SessionPool.this,
@@ -1602,7 +1654,12 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().singleUseReadOnlyTransaction();
           },
           true);
@@ -1612,7 +1669,12 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().singleUseReadOnlyTransaction(bound);
           },
           true);
@@ -1622,7 +1684,12 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().readOnlyTransaction();
           },
           false);
@@ -1632,18 +1699,24 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
+            CachedSession ps = null;
+            try {
+              ps = session.get();
+            } catch (InterruptedException | ExecutionException e) {
+              // this will never be thrown
+            }
             return ps.getDelegate().readOnlyTransaction(bound);
           },
           false);
     }
 
     private ReadOnlyTransaction internalReadOnlyTransaction(
-        Function<PooledSessionFuture, ReadOnlyTransaction> transactionSupplier,
+        Function<SessionFuture, ReadOnlyTransaction> transactionSupplier,
         boolean isSingleUse) {
       try {
+        final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
         return new AutoClosingReadTransaction(
-            transactionSupplier, SessionPool.this, this, isSingleUse);
+            transactionSupplier, SessionPool.this, sessionNotFoundHandler, this, isSingleUse);
       } catch (Exception e) {
         close();
         throw e;
