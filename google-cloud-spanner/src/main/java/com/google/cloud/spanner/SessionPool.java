@@ -1157,8 +1157,12 @@ class SessionPool {
     return new PooledSessionFuture(future, span);
   }
 
-  class SessionFuture extends SimpleForwardingListenableFuture<CachedSession> {
+  private MultiplexedSessionFuture createMultiplexedSessionFuture(
+      ListenableFuture<CachedSession> future, ISpan span) {
+    return new MultiplexedSessionFuture(future, span);
+  }
 
+  class SessionFuture extends SimpleForwardingListenableFuture<CachedSession> {
     public SessionFuture(ListenableFuture<CachedSession> delegate) {
       super(delegate);
     }
@@ -2933,20 +2937,23 @@ class SessionPool {
    * Returns a multiplexed session. We would always return the session which is at the front of the
    * queue since this will be the most recently created session.
    */
-  PooledSessionFuture getMultiplexedSession() throws SpannerException {
-    try {
-      multiplexedSessionsInitialized.await();
-    } catch (InterruptedException interruptedException) {
-      throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
-    }
-    ISpan span = tracer.getCurrentSpan();
-    synchronized (lock) {
-      MultiplexedSession session = multiplexedSessions.peek();
-      if (session != null) {
-        MultiplexedSession.ACTIVE_RPC_COUNT.incrementAndGet();
+  Session getMultiplexedSessionWithFallback() throws SpannerException {
+    if (options.getUseMultiplexedSession()) {
+      try {
+        multiplexedSessionsInitialized.await();
+      } catch (InterruptedException interruptedException) {
+        throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
       }
-      return createPooledSessionFuture(Futures.immediateFuture(session), span);
+      ISpan span = tracer.getCurrentSpan();
+      synchronized (lock) {
+        MultiplexedSession session = multiplexedSessions.peek();
+        if (session != null) {
+          MultiplexedSession.ACTIVE_RPC_COUNT.incrementAndGet();
+        }
+        return createMultiplexedSessionFuture(Futures.immediateFuture(session), span);
+      }
     }
+    return getSession();
   }
 
   /**
@@ -2965,29 +2972,6 @@ class SessionPool {
    * </ol>
    */
   PooledSessionFuture getSession() throws SpannerException {
-    return getSession(false);
-  }
-
-  /**
-   * Returns a session to be used for requests to spanner. This method is always non-blocking and
-   * returns a {@link PooledSessionFuture}. In case the pool is exhausted and
-   * {@link SessionPoolOptions#isFailIfPoolExhausted()} has been set, it will throw an exception.
-   * Returned session must be closed by calling {@link Session#close()}.
-   *
-   * <p>Implementation strategy:
-   *
-   * <ol>
-   *   <li>If a read session is available, return that.
-   *   <li>Otherwise if a session can be created, fire a creation request.
-   *   <li>Wait for a session to become available. Note that this can be unblocked either by a
-   *       session being returned to the pool or a new session being created.
-   * </ol>
-   */
-  PooledSessionFuture getSession(final boolean isEligibleForMultiplexedSession)
-      throws SpannerException {
-    if (options.getUseMultiplexedSession() && isEligibleForMultiplexedSession) {
-      return getMultiplexedSession();
-    }
     ISpan span = tracer.getCurrentSpan();
     span.addAnnotation("Acquiring session");
     WaiterFuture waiter = null;

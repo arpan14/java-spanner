@@ -20,7 +20,9 @@ import com.google.api.gax.rpc.ServerStream;
 import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.Options.TransactionOption;
 import com.google.cloud.spanner.Options.UpdateOption;
+import com.google.cloud.spanner.SessionPool.MultiplexedSessionFuture;
 import com.google.cloud.spanner.SessionPool.PooledSessionFuture;
+import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SpannerImpl.ClosedException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -49,12 +51,12 @@ class DatabaseClientImpl implements DatabaseClient {
 
   @VisibleForTesting
   PooledSessionFuture getSession() {
-    return getSession(false);
+    return pool.getSession();
   }
 
   @VisibleForTesting
-  PooledSessionFuture getSession(final boolean isEligibleForMultiplexedSession) {
-    return pool.getSession(isEligibleForMultiplexedSession);
+  Session getMultiplexedSession() {
+    return pool.getMultiplexedSessionWithFallback();
   }
 
   @Override
@@ -128,7 +130,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadContext singleUse() {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).singleUse();
+      return getMultiplexedSession().singleUse();
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
@@ -140,7 +142,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadContext singleUse(TimestampBound bound) {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).singleUse(bound);
+      return getMultiplexedSession().singleUse(bound);
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
@@ -152,7 +154,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadOnlyTransaction singleUseReadOnlyTransaction() {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).singleUseReadOnlyTransaction();
+      return getMultiplexedSession().singleUseReadOnlyTransaction();
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
@@ -164,7 +166,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadOnlyTransaction singleUseReadOnlyTransaction(TimestampBound bound) {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).singleUseReadOnlyTransaction(bound);
+      return getMultiplexedSession().singleUseReadOnlyTransaction(bound);
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
@@ -176,7 +178,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadOnlyTransaction readOnlyTransaction() {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).readOnlyTransaction();
+      return getMultiplexedSession().readOnlyTransaction();
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
@@ -188,7 +190,7 @@ class DatabaseClientImpl implements DatabaseClient {
   public ReadOnlyTransaction readOnlyTransaction(TimestampBound bound) {
     ISpan span = tracer.spanBuilder(READ_ONLY_TRANSACTION);
     try (IScope s = tracer.withSpan(span)) {
-      return getSession(true).readOnlyTransaction(bound);
+      return getMultiplexedSession().readOnlyTransaction(bound);
     } catch (RuntimeException e) {
       span.setStatus(e);
       span.end();
