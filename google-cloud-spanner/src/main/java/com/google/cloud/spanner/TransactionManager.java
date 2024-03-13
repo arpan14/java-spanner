@@ -18,6 +18,7 @@ package com.google.cloud.spanner;
 
 import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.Options.TransactionOption;
+import java.util.concurrent.ExecutionException;
 
 /**
  * An interface for managing the life cycle of a read write transaction including all its retries.

@@ -98,8 +98,12 @@ class SessionImpl implements Session {
   ByteString readyTransactionId;
   private final Map<SpannerRpc.Option, ?> options;
   private volatile Instant lastUseTime;
+<<<<<<< HEAD
   @Nullable private final Instant createTime;
   private final boolean isMultiplexed;
+=======
+  private final Instant createTime;
+>>>>>>> c8d19f41f (chore: added multiplexed session maintainer and generalised AutoClosingTransactionManager class.)
   private ISpan currentSpan;
 
   SessionImpl(SpannerImpl spanner, String name, com.google.protobuf.Timestamp createTime,
@@ -110,6 +114,7 @@ class SessionImpl implements Session {
     this.name = checkNotNull(name);
     this.databaseId = SessionId.of(name).getDatabaseId();
     this.lastUseTime = Instant.now();
+<<<<<<< HEAD
     this.createTime = null;
     this.isMultiplexed = false;
   }
@@ -128,6 +133,9 @@ class SessionImpl implements Session {
     this.lastUseTime = Instant.now();
     this.createTime = convert(createTime);
     this.isMultiplexed = isMultiplexed;
+=======
+    this.createTime = convert(createTime);
+>>>>>>> c8d19f41f (chore: added multiplexed session maintainer and generalised AutoClosingTransactionManager class.)
   }
 
   @Override
@@ -486,7 +494,11 @@ class SessionImpl implements Session {
   }
 
   private Instant convert(com.google.protobuf.Timestamp timestamp) {
+<<<<<<< HEAD
     if (timestamp == null) {
+=======
+    if(timestamp == null) {
+>>>>>>> c8d19f41f (chore: added multiplexed session maintainer and generalised AutoClosingTransactionManager class.)
       return null;
     }
     return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
