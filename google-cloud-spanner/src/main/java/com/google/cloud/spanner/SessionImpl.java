@@ -98,7 +98,7 @@ class SessionImpl implements Session {
   ByteString readyTransactionId;
   private final Map<SpannerRpc.Option, ?> options;
   private volatile Instant lastUseTime;
-  private final Timestamp createTime;
+  private final Instant createTime;
   private ISpan currentSpan;
 
   SessionImpl(SpannerImpl spanner, String name, com.google.protobuf.Timestamp createTime,
@@ -109,7 +109,7 @@ class SessionImpl implements Session {
     this.name = checkNotNull(name);
     this.databaseId = SessionId.of(name).getDatabaseId();
     this.lastUseTime = Instant.now();
-    this.createTime = Timestamp.fromProto(createTime);
+    this.createTime = convert(createTime);
   }
 
   @Override
@@ -133,7 +133,7 @@ class SessionImpl implements Session {
     return lastUseTime;
   }
 
-  Timestamp getCreateTime() {
+  Instant getCreateTime() {
     return createTime;
   }
 
@@ -461,5 +461,12 @@ class SessionImpl implements Session {
 
   TraceWrapper getTracer() {
     return tracer;
+  }
+
+  private Instant convert(com.google.protobuf.Timestamp timestamp) {
+    if(timestamp == null) {
+      return null;
+    }
+    return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
   }
 }

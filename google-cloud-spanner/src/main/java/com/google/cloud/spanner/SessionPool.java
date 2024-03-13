@@ -49,6 +49,7 @@ import com.google.api.core.SettableApiFuture;
 import com.google.api.gax.core.ExecutorProvider;
 import com.google.api.gax.rpc.ServerStream;
 import com.google.cloud.Timestamp;
+import com.google.cloud.Tuple;
 import com.google.cloud.grpc.GrpcTransportOptions;
 import com.google.cloud.grpc.GrpcTransportOptions.ExecutorFactory;
 import com.google.cloud.spanner.Options.QueryOption;
@@ -85,7 +86,9 @@ import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.Meter;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -123,8 +126,8 @@ class SessionPool {
   /**
    * If the {@link SessionPoolOptions#getWaitForMinSessions()} duration is greater than zero, waits
    * for the creation of at least {@link SessionPoolOptions#getMinSessions()} in the pool using the
-   * given duration. If the waiting times out, a {@link SpannerException} with the {@link
-   * ErrorCode#DEADLINE_EXCEEDED} is thrown.
+   * given duration. If the waiting times out, a {@link SpannerException} with the
+   * {@link ErrorCode#DEADLINE_EXCEEDED} is thrown.
    */
   void maybeWaitOnMinSessions() {
     final long timeoutNanos = options.getWaitForMinSessions().toNanos();
@@ -416,8 +419,7 @@ class SessionPool {
         while (true) {
           try {
             synchronized (lock) {
-              CachedSession cachedSession = session.get();
-              cachedSession.markUsed();
+              session.get().markUsed();
             }
             return getReadContextDelegate().readRow(table, key, columns);
           } catch (SessionNotFoundException e) {
@@ -556,7 +558,47 @@ class SessionPool {
      * Handles the given {@link SessionNotFoundException} by possibly converting it to a different
      * exception that should be thrown.
      */
-    SpannerException handleSessionNotFound(SessionNotFoundException notFound);
+    Tuple<CachedSession, SpannerException> handleSessionNotFound(SessionNotFoundException notFound);
+
+    default SpannerException createAbortedExceptionWithMinimalRetryDelay(
+        SessionNotFoundException notFoundException) {
+      return SpannerExceptionFactory.newSpannerException(
+          ErrorCode.ABORTED,
+          notFoundException.getMessage(),
+          SpannerExceptionFactory.createAbortedExceptionWithRetryDelay(
+              notFoundException.getMessage(), notFoundException, 0, 1));
+    }
+  }
+
+  class PooledSessionNotFoundHandler implements SessionNotFoundHandler {
+
+    private final SessionPool sessionPool;
+    private PooledSessionFuture session;
+
+    public PooledSessionNotFoundHandler(SessionPool sessionPool, PooledSessionFuture session) {
+      this.sessionPool = sessionPool;
+      this.session = session;
+    }
+
+    @Override
+    public Tuple<CachedSession, SpannerException> handleSessionNotFound(
+        SessionNotFoundException notFound) {
+      session = sessionPool.replaceSession(notFound, session);
+      CachedSession pooledSession = session.get();
+      return Tuple.of(pooledSession, createAbortedExceptionWithMinimalRetryDelay(notFound));
+    }
+  }
+
+  class MultiplexedSessionNotFoundHandler implements SessionNotFoundHandler {
+
+    public MultiplexedSessionNotFoundHandler() {
+    }
+
+    @Override
+    public Tuple<CachedSession, SpannerException> handleSessionNotFound(
+        SessionNotFoundException notFound) {
+      return null;
+    }
   }
 
   static class SessionPoolResultSet extends ForwardingResultSet {
@@ -573,7 +615,7 @@ class SessionPool {
       try {
         return super.next();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
   }
@@ -595,7 +637,7 @@ class SessionPool {
             try {
               return callback.cursorReady(resultSet);
             } catch (SessionNotFoundException e) {
-              throw handler.handleSessionNotFound(e);
+              throw handler.handleSessionNotFound(e).y();
             }
           });
     }
@@ -605,7 +647,7 @@ class SessionPool {
       try {
         return super.next();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -614,16 +656,16 @@ class SessionPool {
       try {
         return super.tryNext();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
   }
 
   /**
-   * {@link TransactionContext} that is used in combination with an {@link
-   * AutoClosingTransactionManager}. This {@link TransactionContext} handles {@link
-   * SessionNotFoundException}s by replacing the underlying session with a fresh one, and then
-   * throws an {@link AbortedException} to trigger the retry-loop that has been created by the
+   * {@link TransactionContext} that is used in combination with an
+   * {@link AutoClosingTransactionManager}. This {@link TransactionContext} handles
+   * {@link SessionNotFoundException}s by replacing the underlying session with a fresh one, and
+   * then throws an {@link AbortedException} to trigger the retry-loop that has been created by the
    * caller.
    */
   static class SessionPoolTransactionContext implements TransactionContext {
@@ -668,7 +710,7 @@ class SessionPool {
       try {
         return delegate.readRow(table, key, columns);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -679,7 +721,7 @@ class SessionPool {
             AbstractReadContext.consumeSingleRowAsync(rs),
             SessionNotFoundException.class,
             input -> {
-              throw handler.handleSessionNotFound(input);
+              throw handler.handleSessionNotFound(input).y();
             },
             MoreExecutors.directExecutor());
       }
@@ -700,7 +742,7 @@ class SessionPool {
       try {
         return delegate.readRowUsingIndex(table, index, key, columns);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -712,7 +754,7 @@ class SessionPool {
             AbstractReadContext.consumeSingleRowAsync(rs),
             SessionNotFoundException.class,
             input -> {
-              throw handler.handleSessionNotFound(input);
+              throw handler.handleSessionNotFound(input).y();
             },
             MoreExecutors.directExecutor());
       }
@@ -740,7 +782,7 @@ class SessionPool {
       try {
         return delegate.analyzeUpdateStatement(statement, analyzeMode, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -749,7 +791,7 @@ class SessionPool {
       try {
         return delegate.executeUpdate(statement, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -759,7 +801,7 @@ class SessionPool {
           delegate.executeUpdateAsync(statement, options),
           SessionNotFoundException.class,
           input -> {
-            throw handler.handleSessionNotFound(input);
+            throw handler.handleSessionNotFound(input).y();
           },
           MoreExecutors.directExecutor());
     }
@@ -769,7 +811,7 @@ class SessionPool {
       try {
         return delegate.batchUpdate(statements, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e);
+        throw handler.handleSessionNotFound(e).y();
       }
     }
 
@@ -780,7 +822,7 @@ class SessionPool {
           delegate.batchUpdateAsync(statements, options),
           SessionNotFoundException.class,
           input -> {
-            throw handler.handleSessionNotFound(input);
+            throw handler.handleSessionNotFound(input).y();
           },
           MoreExecutors.directExecutor());
     }
@@ -806,53 +848,52 @@ class SessionPool {
     }
   }
 
-  private static class AutoClosingTransactionManager
-      implements TransactionManager, SessionNotFoundHandler {
+  private static class AutoClosingTransactionManager implements TransactionManager {
 
     private TransactionManager delegate;
     private final SessionPool sessionPool;
-    private PooledSessionFuture session;
+    private final SessionNotFoundHandler sessionNotFoundHandler;
+    private SessionFuture session;
     private final TransactionOption[] options;
     private boolean closed;
     private boolean restartedAfterSessionNotFound;
 
     AutoClosingTransactionManager(
-        SessionPool sessionPool, PooledSessionFuture session, TransactionOption... options) {
+        SessionPool sessionPool, SessionFuture session,
+        SessionNotFoundHandler sessionNotFoundHandler, TransactionOption... options) {
       this.sessionPool = sessionPool;
       this.session = session;
       this.options = options;
+      this.sessionNotFoundHandler = sessionNotFoundHandler;
     }
 
     @Override
     public TransactionContext begin() {
-      this.delegate = session.get().transactionManager(options);
+      try {
+        this.delegate = session.get().transactionManager(options);
+      } catch (InterruptedException | ExecutionException e) {
+        /**
+         * this exception will never be thrown today since all implementations of
+         * {@link SessionFuture} class catch the exception internally.
+         */
+      }
       // This cannot throw a SessionNotFoundException, as it does not call the BeginTransaction RPC.
       // Instead, the BeginTransaction will be included with the first statement of the transaction.
       return internalBegin();
     }
 
     private TransactionContext internalBegin() {
-      TransactionContext res = new SessionPoolTransactionContext(this, delegate.begin());
-      session.get().markUsed();
+      TransactionContext res = new SessionPoolTransactionContext(
+          sessionNotFoundHandler, delegate.begin());
+      try {
+        session.get().markUsed();
+      } catch (InterruptedException | ExecutionException e) {
+        /**
+         * this exception will never be thrown today since all implementations of
+         * {@link SessionFuture} class catch the exception internally.
+         */
+      }
       return res;
-    }
-
-    @Override
-    public SpannerException handleSessionNotFound(SessionNotFoundException notFoundException) {
-      session = sessionPool.replaceSession(notFoundException, session);
-      CachedSession pooledSession = session.get();
-      delegate = pooledSession.getDelegate().transactionManager(options);
-      restartedAfterSessionNotFound = true;
-      return createAbortedExceptionWithMinimalRetryDelay(notFoundException);
-    }
-
-    private static SpannerException createAbortedExceptionWithMinimalRetryDelay(
-        SessionNotFoundException notFoundException) {
-      return SpannerExceptionFactory.newSpannerException(
-          ErrorCode.ABORTED,
-          notFoundException.getMessage(),
-          SpannerExceptionFactory.createAbortedExceptionWithRetryDelay(
-              notFoundException.getMessage(), notFoundException, 0, 1));
     }
 
     @Override
@@ -860,8 +901,11 @@ class SessionPool {
       try {
         delegate.commit();
       } catch (SessionNotFoundException e) {
-        throw handleSessionNotFound(e);
+        Tuple<CachedSession, SpannerException> tuple =
+            sessionNotFoundHandler.handleSessionNotFound(e);
+        this.delegate = tuple.x().transactionManager(options);
       } finally {
+        restartedAfterSessionNotFound = true;
         if (getState() != TransactionState.ABORTED) {
           close();
         }
@@ -882,15 +926,18 @@ class SessionPool {
       while (true) {
         try {
           if (restartedAfterSessionNotFound) {
-            TransactionContext res = new SessionPoolTransactionContext(this, delegate.begin());
+            TransactionContext res = new SessionPoolTransactionContext(sessionNotFoundHandler,
+                delegate.begin());
             restartedAfterSessionNotFound = false;
             return res;
           } else {
-            return new SessionPoolTransactionContext(this, delegate.resetForRetry());
+            return new SessionPoolTransactionContext(sessionNotFoundHandler,
+                delegate.resetForRetry());
           }
         } catch (SessionNotFoundException e) {
-          session = sessionPool.replaceSession(e, session);
-          CachedSession pooledSession = session.get();
+          Tuple<CachedSession, SpannerException> tuple =
+              sessionNotFoundHandler.handleSessionNotFound(e);
+          CachedSession pooledSession = tuple.x();
           delegate = pooledSession.getDelegate().transactionManager(options);
           restartedAfterSessionNotFound = true;
         }
@@ -918,7 +965,7 @@ class SessionPool {
           delegate.close();
         }
       } finally {
-        session.close();
+        ((Session) session).close();
       }
     }
 
@@ -1110,8 +1157,14 @@ class SessionPool {
     return new PooledSessionFuture(future, span);
   }
 
-  class PooledSessionFuture extends SimpleForwardingListenableFuture<CachedSession>
-      implements Session {
+  class SessionFuture extends SimpleForwardingListenableFuture<CachedSession> {
+
+    public SessionFuture(ListenableFuture<CachedSession> delegate) {
+      super(delegate);
+    }
+  }
+
+  class PooledSessionFuture extends SessionFuture implements Session {
 
     private volatile LeakedSessionException leakedException;
     private volatile AtomicBoolean inUse = new AtomicBoolean();
@@ -1269,7 +1322,10 @@ class SessionPool {
 
     @Override
     public TransactionManager transactionManager(TransactionOption... options) {
-      return new AutoClosingTransactionManager(SessionPool.this, this, options);
+      SessionNotFoundHandler sessionNotFoundHandler =
+          new PooledSessionNotFoundHandler(SessionPool.this, this);
+      return new AutoClosingTransactionManager(
+          SessionPool.this, this, sessionNotFoundHandler, options);
     }
 
     @Override
@@ -1356,13 +1412,248 @@ class SessionPool {
             incrementNumSessionsInUse();
             checkedOutSessions.add(this);
           }
-          // TODO : see how this can be fixed and we don't run into exception
-          // TODO : why should this even run for multiplexed session ?
-          // ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
+          // TODO arpanmishra@: why should this even run for multiplexed session, generalise
+          //  this please?
+          if (res instanceof PooledSession) {
+            ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
+          }
         }
         initialized.countDown();
       }
       try {
+        initialized.await();
+        return super.get();
+      } catch (ExecutionException e) {
+        throw SpannerExceptionFactory.newSpannerException(e.getCause());
+      } catch (InterruptedException e) {
+        throw SpannerExceptionFactory.propagateInterrupt(e);
+      }
+    }
+  }
+
+  class MultiplexedSessionFuture extends SessionFuture implements Session {
+
+    private volatile CountDownLatch initialized = new CountDownLatch(1);
+    private final ISpan span;
+
+    @VisibleForTesting
+    MultiplexedSessionFuture(ListenableFuture<CachedSession> delegate, ISpan span) {
+      super(delegate);
+      this.span = span;
+    }
+
+    @Override
+    public Timestamp write(Iterable<Mutation> mutations) throws SpannerException {
+      return writeWithOptions(mutations).getCommitTimestamp();
+    }
+
+    @Override
+    public CommitResponse writeWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      try {
+        return get().writeWithOptions(mutations, options);
+      } finally {
+        close();
+      }
+    }
+
+    @Override
+    public Timestamp writeAtLeastOnce(Iterable<Mutation> mutations) throws SpannerException {
+      return writeAtLeastOnceWithOptions(mutations).getCommitTimestamp();
+    }
+
+    @Override
+    public CommitResponse writeAtLeastOnceWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      try {
+        return get().writeAtLeastOnceWithOptions(mutations, options);
+      } finally {
+        close();
+      }
+    }
+
+    @Override
+    public ServerStream<BatchWriteResponse> batchWriteAtLeastOnce(
+        Iterable<MutationGroup> mutationGroups, TransactionOption... options)
+        throws SpannerException {
+      try {
+        return get().batchWriteAtLeastOnce(mutationGroups, options);
+      } finally {
+        close();
+      }
+    }
+
+    @Override
+    public ReadContext singleUse() {
+      try {
+        return new AutoClosingReadContext<>(
+            session -> {
+              CachedSession ps = session.get();
+              return ps.getDelegate().singleUse();
+            },
+            SessionPool.this,
+            this,
+            true);
+      } catch (Exception e) {
+        close();
+        throw e;
+      }
+    }
+
+    @Override
+    public ReadContext singleUse(final TimestampBound bound) {
+      try {
+        return new AutoClosingReadContext<>(
+            session -> {
+              CachedSession ps = session.get();
+              return ps.getDelegate().singleUse(bound);
+            },
+            SessionPool.this,
+            this,
+            true);
+      } catch (Exception e) {
+        close();
+        throw e;
+      }
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction() {
+      return internalReadOnlyTransaction(
+          session -> {
+            CachedSession ps = session.get();
+            return ps.getDelegate().singleUseReadOnlyTransaction();
+          },
+          true);
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction(final TimestampBound bound) {
+      return internalReadOnlyTransaction(
+          session -> {
+            CachedSession ps = session.get();
+            return ps.getDelegate().singleUseReadOnlyTransaction(bound);
+          },
+          true);
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction() {
+      return internalReadOnlyTransaction(
+          session -> {
+            CachedSession ps = session.get();
+            return ps.getDelegate().readOnlyTransaction();
+          },
+          false);
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction(final TimestampBound bound) {
+      return internalReadOnlyTransaction(
+          session -> {
+            CachedSession ps = session.get();
+            return ps.getDelegate().readOnlyTransaction(bound);
+          },
+          false);
+    }
+
+    private ReadOnlyTransaction internalReadOnlyTransaction(
+        Function<PooledSessionFuture, ReadOnlyTransaction> transactionSupplier,
+        boolean isSingleUse) {
+      try {
+        return new AutoClosingReadTransaction(
+            transactionSupplier, SessionPool.this, this, isSingleUse);
+      } catch (Exception e) {
+        close();
+        throw e;
+      }
+    }
+
+    @Override
+    public TransactionRunner readWriteTransaction(TransactionOption... options) {
+      return new SessionPoolTransactionRunner(SessionPool.this, this, options);
+    }
+
+    @Override
+    public TransactionManager transactionManager(TransactionOption... options) {
+      SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new AutoClosingTransactionManager(SessionPool.this, this, sessionNotFoundHandler, options);
+    }
+
+    @Override
+    public AsyncRunner runAsync(TransactionOption... options) {
+      return new SessionPoolAsyncRunner(SessionPool.this, this, options);
+    }
+
+    @Override
+    public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
+      return new SessionPoolAsyncTransactionManager(SessionPool.this, this, options);
+    }
+
+    @Override
+    public long executePartitionedUpdate(Statement stmt, UpdateOption... options) {
+      try {
+        return get().executePartitionedUpdate(stmt, options);
+      } finally {
+        close();
+      }
+    }
+
+    @Override
+    public String getName() {
+      return get().getName();
+    }
+
+    @Override
+    public void prepareReadWriteTransaction() {
+      get().prepareReadWriteTransaction();
+    }
+
+    @Override
+    public void close() {
+      try {
+        asyncClose().get();
+      } catch (InterruptedException e) {
+        throw SpannerExceptionFactory.propagateInterrupt(e);
+      } catch (ExecutionException e) {
+        throw SpannerExceptionFactory.asSpannerException(e.getCause());
+      }
+    }
+
+    @Override
+    public ApiFuture<Empty> asyncClose() {
+      CachedSession delegate = getOrNull();
+      if (delegate != null) {
+        return delegate.asyncClose();
+      }
+      return ApiFutures.immediateFuture(Empty.getDefaultInstance());
+    }
+
+    private CachedSession getOrNull() {
+      try {
+        return get();
+      } catch (Throwable t) {
+        return null;
+      }
+    }
+
+    @Override
+    public CachedSession get() {
+      CachedSession res = null;
+      try {
+        res = super.get();
+      } catch (Throwable e) {
+        // ignore the exception as it will be handled by the call to super.get() below.
+      }
+      if (res != null) {
+        // TODO arpanmishra@ why do we really need to add this span?
+        res.markBusy(span);
+        span.addAnnotation("Using multiplexed Session", "sessionId", res.getName());
+      }
+      initialized.countDown();
+
+      try {
+        // TODO arpanmishra@ do we really need this latch?
         initialized.await();
         return super.get();
       } catch (ExecutionException e) {
@@ -1392,7 +1683,7 @@ class SessionPool {
 
   static final class MultiplexedSession implements CachedSession {
 
-    private static final AtomicInteger SESSION_COUNTER = new AtomicInteger(0);
+    private static final AtomicInteger ACTIVE_RPC_COUNT = new AtomicInteger(0);
 
     SessionImpl delegate;
 
@@ -1406,7 +1697,8 @@ class SessionPool {
     }
 
     @Override
-    public void setAllowReplacing(boolean allowReplacing) {}
+    public void setAllowReplacing(boolean allowReplacing) {
+    }
 
     @Override
     public void markBusy(ISpan span) {
@@ -1414,7 +1706,8 @@ class SessionPool {
     }
 
     @Override
-    public void markUsed() {}
+    public void markUsed() {
+    }
 
     @Override
     public SpannerException setLastException(SpannerException exception) {
@@ -1533,7 +1826,7 @@ class SessionPool {
 
     @Override
     public void close() {
-      SESSION_COUNTER.decrementAndGet();
+      ACTIVE_RPC_COUNT.decrementAndGet();
     }
 
     @Override
@@ -1541,11 +1834,16 @@ class SessionPool {
       close();
       return ApiFutures.immediateFuture(Empty.getDefaultInstance());
     }
+
+    int getActiveRPCCount() {
+      return ACTIVE_RPC_COUNT.get();
+    }
   }
 
   class PooledSession implements CachedSession {
 
-    @VisibleForTesting SessionImpl delegate;
+    @VisibleForTesting
+    SessionImpl delegate;
     private volatile SpannerException lastException;
     private volatile boolean allowReplacing = true;
 
@@ -1936,13 +2234,16 @@ class SessionPool {
     // sessions in use.
     private final Duration windowLength = Duration.ofMillis(TimeUnit.MINUTES.toMillis(10));
     // Frequency of the timer loop.
-    @VisibleForTesting final long loopFrequency = options.getLoopFrequency();
+    @VisibleForTesting
+    final long loopFrequency = options.getLoopFrequency();
     // Number of loop iterations in which we need to close all the sessions waiting for closure.
-    @VisibleForTesting final long numClosureCycles = windowLength.toMillis() / loopFrequency;
+    @VisibleForTesting
+    final long numClosureCycles = windowLength.toMillis() / loopFrequency;
     private final Duration keepAliveMillis =
         Duration.ofMillis(TimeUnit.MINUTES.toMillis(options.getKeepAliveIntervalMinutes()));
     // Number of loop iterations in which we need to keep alive all the sessions
-    @VisibleForTesting final long numKeepAliveCycles = keepAliveMillis.toMillis() / loopFrequency;
+    @VisibleForTesting
+    final long numKeepAliveCycles = keepAliveMillis.toMillis() / loopFrequency;
 
     /**
      * Variable maintaining the last execution time of the long-running transaction cleanup task.
@@ -1953,7 +2254,8 @@ class SessionPool {
      * every 2 minutes, then we need to keep a track of when was the last time that this task
      * executed and makes sure we only execute it every 2 minutes and not every 10 seconds.
      */
-    @VisibleForTesting Instant lastExecutionTime;
+    @VisibleForTesting
+    Instant lastExecutionTime;
 
     boolean closed = false;
 
@@ -2011,6 +2313,7 @@ class SessionPool {
         }
       }
       removeLongRunningSessions(currTime);
+      maintainMultiplexedSession(currTime);
     }
 
     private void removeIdleSessions(Instant currTime) {
@@ -2050,8 +2353,8 @@ class SessionPool {
             (long)
                 Math.ceil(
                     (double)
-                            ((options.getMinSessions() + options.getMaxIdleSessions())
-                                - numSessionsInUse)
+                        ((options.getMinSessions() + options.getMaxIdleSessions())
+                            - numSessionsInUse)
                         / numKeepAliveCycles);
       }
       // Now go over all the remaining sessions and see if they need to be kept alive explicitly.
@@ -2128,8 +2431,8 @@ class SessionPool {
                 Duration.between(session.getDelegate().getLastUseTime(), currentTime);
             if (!session.eligibleForLongRunning
                 && durationFromLastUse.compareTo(
-                        inactiveTransactionRemovalOptions.getIdleTimeThreshold())
-                    > 0) {
+                inactiveTransactionRemovalOptions.getIdleTimeThreshold())
+                > 0) {
               if ((options.warnInactiveTransactions() || options.warnAndCloseInactiveTransactions())
                   && !session.isLeakedExceptionLogged) {
                 if (options.warnAndCloseInactiveTransactions()) {
@@ -2151,7 +2454,7 @@ class SessionPool {
                 }
               }
               if ((options.closeInactiveTransactions()
-                      || options.warnAndCloseInactiveTransactions())
+                  || options.warnAndCloseInactiveTransactions())
                   && session.state != SessionState.CLOSING) {
                 final boolean isRemoved = removeFromPool(session);
                 if (isRemoved) {
@@ -2178,24 +2481,30 @@ class SessionPool {
           final Duration durationFromCreationTime =
               Duration.between(session.getDelegate().getCreateTime(), currentTime);
           if (durationFromCreationTime.compareTo(
-              inactiveTransactionRemovalOptions.getIdleTimeThreshold())
+              options.getMultiplexedSessionMaintenanceDuration())
               > 0) {
+            logger.log(
+                Level.INFO, String.format("Replacing Multiplexed Session => %s created "
+                        + "before maintenance window => %s", session.getName(),
+                    options.getMultiplexedSessionMaintenanceDuration()));
+            createMultiplexedSessions();
 
-        }
+          }
 
+          // TODO arpanmishra@ this should take a lock?
+          // TODO can we add a more efficient implementation of queue that only locks the front
+          // of the queue
+          if (multiplexedSessions.size() > 1) {
+            final MultiplexedSession lastSession = multiplexedSessions.peekLast();
+            final int rpcCount = lastSession.getActiveRPCCount();
+            if (lastSession.getActiveRPCCount() <= 0) {
+              logger.log(
+                  Level.INFO, String.format("Removed Multiplexed Session => %s with "
+                      + "RPC count => %s ", lastSession.getName(), rpcCount));
+              multiplexedSessions.pollLast();
+            }
 
-        final InactiveTransactionRemovalOptions inactiveTransactionRemovalOptions =
-            options.getInactiveTransactionRemovalOptions();
-        final Instant minExecutionTime =
-            lastExecutionTime.plus(inactiveTransactionRemovalOptions.getExecutionFrequency());
-        if (currentTime.isBefore(minExecutionTime)) {
-          return;
-        }
-        lastExecutionTime = currentTime; // update this only after we have decided to execute task
-        if (options.closeInactiveTransactions()
-            || options.warnInactiveTransactions()
-            || options.warnAndCloseInactiveTransactions()) {
-
+          }
         }
       } catch (final Throwable t) {
         logger.log(Level.WARNING, "Failed to maintain multiplexed session", t);
@@ -2297,7 +2606,7 @@ class SessionPool {
   private AtomicLong numWaiterTimeouts = new AtomicLong();
 
   @GuardedBy("lock")
-  private final ArrayList<MultiplexedSession> multiplexedSessions;
+  private final Deque<MultiplexedSession> multiplexedSessions;
 
   private final CountDownLatch multiplexedSessionsInitialized;
 
@@ -2313,9 +2622,11 @@ class SessionPool {
   private final MultiplexedSessionConsumer multiplexedSessionConsumer =
       new MultiplexedSessionConsumer();
 
-  @VisibleForTesting Function<PooledSession, Void> idleSessionRemovedListener;
+  @VisibleForTesting
+  Function<PooledSession, Void> idleSessionRemovedListener;
 
-  @VisibleForTesting Function<PooledSession, Void> longRunningSessionRemovedListener;
+  @VisibleForTesting
+  Function<PooledSession, Void> longRunningSessionRemovedListener;
 
   private final CountDownLatch waitOnMinSessionsLatch;
 
@@ -2443,7 +2754,7 @@ class SessionPool {
     this.initOpenTelemetryMetricsCollection(openTelemetry, attributes);
     this.waitOnMinSessionsLatch =
         options.getMinSessions() > 0 ? new CountDownLatch(1) : new CountDownLatch(0);
-    this.multiplexedSessions = new ArrayList<>(1);
+    this.multiplexedSessions = new ArrayDeque<>();
     this.multiplexedSessionsInitialized = new CountDownLatch(1);
   }
 
@@ -2452,9 +2763,10 @@ class SessionPool {
    *     dialect is available. It will potentially execute one or two RPCs to get the dialect if
    *     necessary: One to create a session if there are no sessions in the pool (yet), and one to
    *     query the database for the dialect that is used. It is recommended that clients that always
-   *     need to know the dialect set {@link
-   *     SessionPoolOptions.Builder#setAutoDetectDialect(boolean)} to true. This will ensure that
-   *     the dialect is fetched automatically in a background task when a session pool is created.
+   *     need to know the dialect set
+   *     {@link SessionPoolOptions.Builder#setAutoDetectDialect(boolean)} to true. This will ensure
+   *     that the dialect is fetched automatically in a background task when a session pool is
+   *     created.
    */
   Dialect getDialect() {
     boolean mustDetectDialect = false;
@@ -2597,7 +2909,7 @@ class SessionPool {
     Iterator<PooledSession> iterator = queue.iterator();
     while (iterator.hasNext()
         && (numChecked + numAlreadyChecked)
-            < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
+        < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
       PooledSession session = iterator.next();
       if (session.delegate.getLastUseTime().isBefore(keepAliveThreshold)) {
         iterator.remove();
@@ -2608,7 +2920,9 @@ class SessionPool {
     return null;
   }
 
-  /** @return true if this {@link SessionPool} is still valid. */
+  /**
+   * @return true if this {@link SessionPool} is still valid.
+   */
   boolean isValid() {
     synchronized (lock) {
       return closureFuture == null && resourceNotFoundException == null;
@@ -2616,10 +2930,8 @@ class SessionPool {
   }
 
   /**
-   * Returns a multiplexed session.
-   *
-   * @return
-   * @throws SpannerException
+   * Returns a multiplexed session. We would always return the session which is at the front of the
+   * queue since this will be the most recently created session.
    */
   PooledSessionFuture getMultiplexedSession() throws SpannerException {
     try {
@@ -2629,16 +2941,19 @@ class SessionPool {
     }
     ISpan span = tracer.getCurrentSpan();
     synchronized (lock) {
-      MultiplexedSession session = multiplexedSessions.get(multiplexedSessions.size() - 1);
+      MultiplexedSession session = multiplexedSessions.peek();
+      if (session != null) {
+        MultiplexedSession.ACTIVE_RPC_COUNT.incrementAndGet();
+      }
       return createPooledSessionFuture(Futures.immediateFuture(session), span);
     }
   }
 
   /**
    * Returns a session to be used for requests to spanner. This method is always non-blocking and
-   * returns a {@link PooledSessionFuture}. In case the pool is exhausted and {@link
-   * SessionPoolOptions#isFailIfPoolExhausted()} has been set, it will throw an exception. Returned
-   * session must be closed by calling {@link Session#close()}.
+   * returns a {@link PooledSessionFuture}. In case the pool is exhausted and
+   * {@link SessionPoolOptions#isFailIfPoolExhausted()} has been set, it will throw an exception.
+   * Returned session must be closed by calling {@link Session#close()}.
    *
    * <p>Implementation strategy:
    *
@@ -2655,9 +2970,9 @@ class SessionPool {
 
   /**
    * Returns a session to be used for requests to spanner. This method is always non-blocking and
-   * returns a {@link PooledSessionFuture}. In case the pool is exhausted and {@link
-   * SessionPoolOptions#isFailIfPoolExhausted()} has been set, it will throw an exception. Returned
-   * session must be closed by calling {@link Session#close()}.
+   * returns a {@link PooledSessionFuture}. In case the pool is exhausted and
+   * {@link SessionPoolOptions#isFailIfPoolExhausted()} has been set, it will throw an exception.
+   * Returned session must be closed by calling {@link Session#close()}.
    *
    * <p>Implementation strategy:
    *
@@ -2767,7 +3082,9 @@ class SessionPool {
     }
   }
 
-  /** Releases a session back to the pool. This might cause one of the waiters to be unblocked. */
+  /**
+   * Releases a session back to the pool. This might cause one of the waiters to be unblocked.
+   */
   private void releaseSession(PooledSession session, boolean isNewSession) {
     Preconditions.checkNotNull(session);
     synchronized (lock) {
@@ -2834,8 +3151,8 @@ class SessionPool {
    *       </ol>
    * </ol>
    *
-   * @param channelOfSessionBeingAdded the channel number being used by the session that is about to
-   *     be released into the pool
+   * @param channelOfSessionBeingAdded the channel number being used by the session that is
+   *     about to be released into the pool
    * @param sessions the list of all sessions in the pool
    * @param checkedOutSessions the currently checked out sessions of the pool
    * @param numChannels the number of channels in use
@@ -3090,14 +3407,14 @@ class SessionPool {
     public void onSessionReady(SessionImpl session) {
       final MultiplexedSession multiplexedSession = new MultiplexedSession(session);
       synchronized (lock) {
-        multiplexedSessions.add(multiplexedSession);
+        multiplexedSessions.addFirst(multiplexedSession);
       }
       multiplexedSessionsInitialized.countDown();
     }
 
     @Override
     public void onSessionCreateFailure(Throwable t, int createFailureForSessionCount) {
-      // TODO: add failure conditions
+      // TODO arpanmishra@ : add failure conditions
     }
   }
 
@@ -3108,7 +3425,9 @@ class SessionPool {
    */
   class SessionConsumerImpl implements SessionConsumer {
 
-    /** Release a new session to the pool. */
+    /**
+     * Release a new session to the pool.
+     */
     @Override
     public void onSessionReady(SessionImpl session) {
       PooledSession pooledSession = null;
