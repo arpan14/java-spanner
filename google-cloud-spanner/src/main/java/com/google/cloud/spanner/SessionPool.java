@@ -948,7 +948,7 @@ class SessionPool {
       } catch (SessionNotFoundException e) {
         Tuple<SessionFuture, SpannerException> tuple =
             sessionNotFoundHandler.handleSessionNotFound(e);
-        this.delegate = ((Session)tuple.x()).transactionManager(options);
+        this.delegate = ((Session) tuple.x()).transactionManager(options);
         restartedAfterSessionNotFound = true;
       } finally {
         if (getState() != TransactionState.ABORTED) {
@@ -1033,6 +1033,7 @@ class SessionPool {
     private I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
+    private final SessionNotFoundHandler sessionNotFoundHandler;
     private TransactionRunner runner;
 
     private SessionPoolTransactionRunner(
@@ -1046,7 +1047,11 @@ class SessionPool {
 
     private TransactionRunner getRunner() {
       if (this.runner == null) {
-        this.runner = session.get().readWriteTransaction(options);
+        try {
+          this.runner = session.get().readWriteTransaction(options);
+        } catch (InterruptedException | ExecutionException ex) {
+          // this will never be thrown
+        }
       }
       return runner;
     }
@@ -1066,13 +1071,17 @@ class SessionPool {
             runner = cachedSession.getDelegate().readWriteTransaction();
           }
         }
-        session.get().markUsed();
+        try {
+          session.get().markUsed();
+        } catch (InterruptedException | ExecutionException ex) {
+          // this will never be thrown
+        }
         return result;
       } catch (SpannerException e) {
         session.get().setLastException(e);
         throw e;
       } finally {
-        session.close();
+        ((Session) session).close();
       }
     }
 
@@ -1643,7 +1652,8 @@ class SessionPool {
 
     @Override
     public TransactionRunner readWriteTransaction(TransactionOption... options) {
-      return new SessionPoolTransactionRunner(SessionPool.this, this, options);
+      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new SessionPoolTransactionRunner(this, sessionNotFoundHandler, options);
     }
 
     @Override
