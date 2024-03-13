@@ -586,7 +586,7 @@ class SessionPool {
      * Handles the given {@link SessionNotFoundException} by possibly converting it to a different
      * exception that should be thrown.
      */
-    Tuple<CachedSession, SpannerException> handleSessionNotFound(SessionNotFoundException notFound);
+    Tuple<SessionFuture, SpannerException> handleSessionNotFound(SessionNotFoundException notFound);
 
     default SpannerException createAbortedExceptionWithMinimalRetryDelay(
         SessionNotFoundException notFoundException) {
@@ -609,11 +609,10 @@ class SessionPool {
     }
 
     @Override
-    public Tuple<CachedSession, SpannerException> handleSessionNotFound(
+    public Tuple<SessionFuture, SpannerException> handleSessionNotFound(
         SessionNotFoundException notFound) {
       session = sessionPool.replaceSession(notFound, session);
-      CachedSession pooledSession = session.get();
-      return Tuple.of(pooledSession, createAbortedExceptionWithMinimalRetryDelay(notFound));
+      return Tuple.of(session, createAbortedExceptionWithMinimalRetryDelay(notFound));
     }
   }
 
@@ -623,7 +622,7 @@ class SessionPool {
     }
 
     @Override
-    public Tuple<CachedSession, SpannerException> handleSessionNotFound(
+    public Tuple<SessionFuture, SpannerException> handleSessionNotFound(
         SessionNotFoundException notFound) {
       return null;
     }
@@ -947,9 +946,9 @@ class SessionPool {
       try {
         delegate.commit();
       } catch (SessionNotFoundException e) {
-        Tuple<CachedSession, SpannerException> tuple =
+        Tuple<SessionFuture, SpannerException> tuple =
             sessionNotFoundHandler.handleSessionNotFound(e);
-        this.delegate = tuple.x().transactionManager(options);
+        this.delegate = ((Session)tuple.x()).transactionManager(options);
         restartedAfterSessionNotFound = true;
       } finally {
         if (getState() != TransactionState.ABORTED) {
@@ -1098,6 +1097,7 @@ class SessionPool {
     private volatile I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
+    private final SessionNotFoundHandler sessionNotFoundHandler;
     private SettableApiFuture<CommitResponse> commitResponse;
 
     private SessionPoolAsyncRunner(
@@ -1149,8 +1149,12 @@ class SessionPool {
                 }
               }
             }
-            session.get().markUsed();
-            session.close();
+            try {
+              session.get().markUsed();
+            } catch (InterruptedException | ExecutionException e) {
+              // this exception will never be thrown
+            }
+            ((Session) session).close();
             setCommitResponse(runner);
             if (exception != null) {
               res.setException(exception);
@@ -1644,13 +1648,15 @@ class SessionPool {
 
     @Override
     public TransactionManager transactionManager(TransactionOption... options) {
-      SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
-      return new AutoClosingTransactionManager(SessionPool.this, this, sessionNotFoundHandler, options);
+      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new AutoClosingTransactionManager(this, sessionNotFoundHandler, options);
     }
 
     @Override
     public AsyncRunner runAsync(TransactionOption... options) {
-      return new SessionPoolAsyncRunner(SessionPool.this, this, options);
+      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new SessionPoolAsyncRunner(
+          SessionPool.this, this, sessionNotFoundHandler, options);
     }
 
     @Override
