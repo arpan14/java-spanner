@@ -170,9 +170,7 @@ class SessionPool {
    * Wrapper around {@code ReadContext} that releases the session to the pool once the call is
    * finished, if it is a single use context.
    */
-  private static class AutoClosingReadContext<
-          I extends SimpleForwardingListenableFuture<CachedSession> & SessionFuture,
-          T extends ReadContext>
+  private static class AutoClosingReadContext<I extends SessionFuture, T extends ReadContext>
       implements ReadContext {
     /**
      * {@link AsyncResultSet} implementation that keeps track of the async operations that are still
@@ -290,11 +288,7 @@ class SessionPool {
             boolean ret = super.next();
             if (beforeFirst) {
               synchronized (lock) {
-                try {
-                  session.get().markUsed();
-                } catch (ExecutionException | InterruptedException e) {
-                  // this will never be thrown
-                }
+                session.get().markUsed();
                 beforeFirst = false;
                 sessionUsedForQuery = true;
               }
@@ -308,11 +302,7 @@ class SessionPool {
           } catch (SpannerException e) {
             synchronized (lock) {
               if (!closed && isSingleUse) {
-                try {
-                  session.get().setLastException(e);
-                } catch (InterruptedException | ExecutionException ex) {
-                  // this will never be thrown
-                }
+                session.get().setLastException(e);
                 AutoClosingReadContext.this.close();
               }
             }
@@ -437,8 +427,6 @@ class SessionPool {
             return getReadContextDelegate().readRow(table, key, columns);
           } catch (SessionNotFoundException e) {
             replaceSessionIfPossible(e);
-          } catch (InterruptedException | ExecutionException e) {
-            // this exception is never thrown
           }
         }
       } finally {
@@ -470,8 +458,6 @@ class SessionPool {
             return getReadContextDelegate().readRowUsingIndex(table, index, key, columns);
           } catch (SessionNotFoundException e) {
             replaceSessionIfPossible(e);
-          } catch (ExecutionException | InterruptedException e) {
-            // this exception is never thrown
           }
         }
       } finally {
@@ -552,8 +538,7 @@ class SessionPool {
     }
   }
 
-  private static class AutoClosingReadTransaction<
-          I extends SimpleForwardingListenableFuture<CachedSession> & SessionFuture>
+  private static class AutoClosingReadTransaction<I extends SessionFuture>
       extends AutoClosingReadContext<I, ReadOnlyTransaction> implements ReadOnlyTransaction {
 
     AutoClosingReadTransaction(
@@ -910,14 +895,7 @@ class SessionPool {
 
     @Override
     public TransactionContext begin() {
-      try {
-        this.delegate = session.get().transactionManager(options);
-      } catch (InterruptedException | ExecutionException e) {
-        /**
-         * this exception will never be thrown today since all implementations of {@link
-         * SessionFuture} class catch the exception internally.
-         */
-      }
+      this.delegate = session.get().transactionManager(options);
       // This cannot throw a SessionNotFoundException, as it does not call the BeginTransaction RPC.
       // Instead, the BeginTransaction will be included with the first statement of the transaction.
       return internalBegin();
@@ -926,14 +904,7 @@ class SessionPool {
     private TransactionContext internalBegin() {
       TransactionContext res =
           new SessionPoolTransactionContext<>(sessionNotFoundHandler, delegate.begin());
-      try {
-        session.get().markUsed();
-      } catch (InterruptedException | ExecutionException e) {
-        /**
-         * this exception will never be thrown today since all implementations of {@link
-         * SessionFuture} class catch the exception internally.
-         */
-      }
+      session.get().markUsed();
       return res;
     }
 
@@ -961,13 +932,9 @@ class SessionPool {
         delegate.commit();
       } catch (SessionNotFoundException e) {
         Tuple<T, SpannerException> tuple = sessionNotFoundHandler.handleSessionNotFound(e);
-        try {
-          this.delegate = tuple.x().get().transactionManager(options);
-          restartedAfterSessionNotFound = true;
-          throw tuple.y();
-        } catch (InterruptedException | ExecutionException ex) {
-          // this exception will not be thrown
-        }
+        this.delegate = tuple.x().get().transactionManager(options);
+        restartedAfterSessionNotFound = true;
+        throw tuple.y();
       } finally {
         if (getState() != TransactionState.ABORTED) {
           close();
@@ -1064,11 +1031,7 @@ class SessionPool {
 
     private TransactionRunner getRunner() {
       if (this.runner == null) {
-        try {
-          this.runner = session.get().readWriteTransaction(options);
-        } catch (InterruptedException | ExecutionException ex) {
-          // this will never be thrown
-        }
+        this.runner = session.get().readWriteTransaction(options);
       }
       return runner;
     }
@@ -1088,11 +1051,7 @@ class SessionPool {
             runner = cachedSession.getDelegate().readWriteTransaction();
           }
         }
-        try {
-          session.get().markUsed();
-        } catch (InterruptedException | ExecutionException ex) {
-          // this will never be thrown
-        }
+        session.get().markUsed();
         return result;
       } catch (SpannerException e) {
         session.get().setLastException(e);
@@ -1119,9 +1078,7 @@ class SessionPool {
     }
   }
 
-  private static class SessionPoolAsyncRunner<
-          I extends SimpleForwardingListenableFuture<CachedSession> & SessionFuture>
-      implements AsyncRunner {
+  private static class SessionPoolAsyncRunner<I extends SessionFuture> implements AsyncRunner {
     private volatile I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
@@ -1178,11 +1135,7 @@ class SessionPool {
                 }
               }
             }
-            try {
-              session.get().markUsed();
-            } catch (InterruptedException | ExecutionException e) {
-              // this exception will never be thrown
-            }
+            session.get().markUsed();
             session.close();
             setCommitResponse(runner);
             if (exception != null) {
