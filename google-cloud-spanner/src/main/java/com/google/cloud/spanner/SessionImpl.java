@@ -102,8 +102,7 @@ class SessionImpl implements Session {
   private final boolean isMultiplexed;
   private ISpan currentSpan;
 
-  SessionImpl(SpannerImpl spanner, String name,
-      Map<SpannerRpc.Option, ?> options) {
+  SessionImpl(SpannerImpl spanner, String name, Map<SpannerRpc.Option, ?> options) {
     this.spanner = spanner;
     this.tracer = spanner.getTracer();
     this.options = options;
