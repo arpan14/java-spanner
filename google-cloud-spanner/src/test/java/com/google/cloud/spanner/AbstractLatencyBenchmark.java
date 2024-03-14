@@ -33,14 +33,14 @@ public abstract class AbstractLatencyBenchmark {
    * scenario, using 1 thread means there will be 1 request. Use a value > 1 to have concurrent
    * requests.
    */
-  static final int PARALLEL_THREADS = 1;
+  static final int PARALLEL_THREADS = 30;
 
   /**
    * Total number of reads per test run for 1 thread. Increasing the value here will increase the
    * duration of the benchmark. For ex - With PARALLEL_THREADS = 2, TOTAL_READS_PER_RUN = 200, there
    * will be 400 read requests (200 on each thread).
    */
-  static final int TOTAL_READS_PER_RUN = 12000;
+  static final int TOTAL_READS_PER_RUN = 1920000;
 
   /**
    * Number of requests which are used to initialise/warmup the benchmark. The latency number of
