@@ -23,17 +23,18 @@ import com.google.api.core.SettableApiFuture;
 import com.google.cloud.Timestamp;
 import com.google.cloud.Tuple;
 import com.google.cloud.spanner.Options.TransactionOption;
-import com.google.cloud.spanner.SessionPool.PooledSessionFuture;
+import com.google.cloud.spanner.SessionPool.CachedSession;
 import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SessionPool.SessionNotFoundHandler;
 import com.google.cloud.spanner.TransactionContextFutureImpl.CommittableAsyncTransactionManager;
 import com.google.cloud.spanner.TransactionManager.TransactionState;
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.ForwardingListenableFuture.SimpleForwardingListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import javax.annotation.concurrent.GuardedBy;
 
-class SessionPoolAsyncTransactionManager<I extends SessionFuture>
-    implements CommittableAsyncTransactionManager {
+class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFuture<CachedSession>
+    & SessionFuture> implements CommittableAsyncTransactionManager {
   private final Object lock = new Object();
 
   @GuardedBy("lock")
@@ -96,8 +97,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
         new ApiFutureCallback<AsyncTransactionManagerImpl>() {
           @Override
           public void onFailure(Throwable t) {
-            // TODO arpanmishra@ can we avoid the need of this typecasting?
-            ((Session) session).close();
+            session.close();
           }
 
           @Override
@@ -112,7 +112,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
 
                   @Override
                   public void onSuccess(Void result) {
-                    ((Session) session).close();
+                    session.close();
                     res.set(result);
                   }
                 },
