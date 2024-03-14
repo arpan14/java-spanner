@@ -1690,7 +1690,8 @@ class SessionPool {
 
     @Override
     public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
-      return new SessionPoolAsyncTransactionManager(SessionPool.this, this, options);
+      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new SessionPoolAsyncTransactionManager(sessionNotFoundHandler, this, options);
     }
 
     @Override
