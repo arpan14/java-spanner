@@ -1470,11 +1470,7 @@ class SessionPool {
             incrementNumSessionsInUse();
             checkedOutSessions.add(this);
           }
-          // TODO arpanmishra@: why should this even run for multiplexed session, generalise
-          //  this please?
-          if (res instanceof PooledSession) {
-            ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
-          }
+          ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
         }
         initialized.countDown();
       }
