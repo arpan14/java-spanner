@@ -98,9 +98,20 @@ class SessionImpl implements Session {
   ByteString readyTransactionId;
   private final Map<SpannerRpc.Option, ?> options;
   private volatile Instant lastUseTime;
+  @Nullable
   private final Instant createTime;
   private ISpan currentSpan;
 
+  SessionImpl(SpannerImpl spanner, String name,
+      Map<SpannerRpc.Option, ?> options) {
+    this.spanner = spanner;
+    this.tracer = spanner.getTracer();
+    this.options = options;
+    this.name = checkNotNull(name);
+    this.databaseId = SessionId.of(name).getDatabaseId();
+    this.lastUseTime = Instant.now();
+    this.createTime = null;
+  }
   SessionImpl(SpannerImpl spanner, String name, com.google.protobuf.Timestamp createTime,
       Map<SpannerRpc.Option, ?> options) {
     this.spanner = spanner;
