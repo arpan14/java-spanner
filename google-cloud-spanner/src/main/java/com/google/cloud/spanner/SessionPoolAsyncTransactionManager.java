@@ -33,8 +33,9 @@ import com.google.common.util.concurrent.ForwardingListenableFuture.SimpleForwar
 import com.google.common.util.concurrent.MoreExecutors;
 import javax.annotation.concurrent.GuardedBy;
 
-class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFuture<CachedSession>
-    & SessionFuture> implements CommittableAsyncTransactionManager {
+class SessionPoolAsyncTransactionManager<
+        I extends SimpleForwardingListenableFuture<CachedSession> & SessionFuture>
+    implements CommittableAsyncTransactionManager {
   private final Object lock = new Object();
 
   @GuardedBy("lock")
@@ -42,6 +43,7 @@ class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFut
 
   @GuardedBy("lock")
   private AbortedException abortedException;
+
   private final SessionNotFoundHandler<I> sessionNotFoundHandler;
   private final TransactionOption[] options;
   private volatile I session;
@@ -49,8 +51,7 @@ class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFut
   private boolean restartedAfterSessionNotFound;
 
   SessionPoolAsyncTransactionManager(
-      SessionNotFoundHandler<I> sessionNotFoundHandler,
-      I session, TransactionOption... options) {
+      SessionNotFoundHandler<I> sessionNotFoundHandler, I session, TransactionOption... options) {
     this.options = options;
     this.sessionNotFoundHandler = sessionNotFoundHandler;
     createTransaction(session);
@@ -254,8 +255,7 @@ class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFut
                   return input.resetForRetryAsync();
                 },
                 MoreExecutors.directExecutor()),
-            input ->
-                new SessionPool.SessionPoolTransactionContext(sessionNotFoundHandler, input),
+            input -> new SessionPool.SessionPoolTransactionContext(sessionNotFoundHandler, input),
             MoreExecutors.directExecutor()));
   }
 

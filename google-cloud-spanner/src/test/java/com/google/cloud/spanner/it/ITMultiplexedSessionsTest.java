@@ -20,7 +20,6 @@ import static com.google.common.truth.Truth.assertThat;
 import com.google.cloud.spanner.Database;
 import com.google.cloud.spanner.DatabaseAdminClient;
 import com.google.cloud.spanner.DatabaseClient;
-import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.IntegrationTestEnv;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.Mutation;
@@ -30,7 +29,6 @@ import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TimestampBound;
-import com.google.cloud.spanner.connection.ConnectionOptions;
 import com.google.common.collect.ImmutableList;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -39,7 +37,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.logging.Level;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -76,22 +73,23 @@ public class ITMultiplexedSessionsTest {
     SpannerOptions options =
         SpannerOptions.newBuilder()
             .setSessionPoolOption(
-                SessionPoolOptions.newBuilder()
-                    .setUseMultiplexedSession(true).build())
+                SessionPoolOptions.newBuilder().setUseMultiplexedSession(true).build())
             .setHost(SERVER_URL)
             .build();
     spanner = options.getService();
     databaseAdminClient = spanner.getDatabaseAdminClient();
     final Database database =
         databaseAdminClient
-            .createDatabase(INSTANCE_ID, databaseId, ImmutableList.of(
-                "CREATE TABLE TestTable ("
-                    + "  key                STRING(MAX) NOT NULL,"
-                    + "  stringvalue        STRING(MAX),"
-                    + ") PRIMARY KEY (key)",
-                "CREATE INDEX TestTableByValue ON TestTable(stringvalue)",
-                "CREATE INDEX TestTableByValueDesc ON TestTable(stringvalue DESC)"
-            ))
+            .createDatabase(
+                INSTANCE_ID,
+                databaseId,
+                ImmutableList.of(
+                    "CREATE TABLE TestTable ("
+                        + "  key                STRING(MAX) NOT NULL,"
+                        + "  stringvalue        STRING(MAX),"
+                        + ") PRIMARY KEY (key)",
+                    "CREATE INDEX TestTableByValue ON TestTable(stringvalue)",
+                    "CREATE INDEX TestTableByValueDesc ON TestTable(stringvalue DESC)"))
             .get(Duration.ofMinutes(2).toNanos(), TimeUnit.NANOSECONDS);
 
     databaseIds.add(databaseId);
@@ -121,8 +119,7 @@ public class ITMultiplexedSessionsTest {
   @Test
   public void pointRead() {
     Struct row =
-        client.singleUse(TimestampBound.strong())
-            .readRow(TABLE_NAME, Key.of("k1"), ALL_COLUMNS);
+        client.singleUse(TimestampBound.strong()).readRow(TABLE_NAME, Key.of("k1"), ALL_COLUMNS);
     assertThat(row).isNotNull();
     assertThat(row.getString(0)).isEqualTo("k1");
     assertThat(row.getString(1)).isEqualTo("v1");

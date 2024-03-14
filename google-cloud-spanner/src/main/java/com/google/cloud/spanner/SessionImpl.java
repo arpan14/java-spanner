@@ -98,12 +98,10 @@ class SessionImpl implements Session {
   ByteString readyTransactionId;
   private final Map<SpannerRpc.Option, ?> options;
   private volatile Instant lastUseTime;
-  @Nullable
-  private final Instant createTime;
+  @Nullable private final Instant createTime;
   private ISpan currentSpan;
 
-  SessionImpl(SpannerImpl spanner, String name,
-      Map<SpannerRpc.Option, ?> options) {
+  SessionImpl(SpannerImpl spanner, String name, Map<SpannerRpc.Option, ?> options) {
     this.spanner = spanner;
     this.tracer = spanner.getTracer();
     this.options = options;
@@ -112,7 +110,11 @@ class SessionImpl implements Session {
     this.lastUseTime = Instant.now();
     this.createTime = null;
   }
-  SessionImpl(SpannerImpl spanner, String name, com.google.protobuf.Timestamp createTime,
+
+  SessionImpl(
+      SpannerImpl spanner,
+      String name,
+      com.google.protobuf.Timestamp createTime,
       Map<SpannerRpc.Option, ?> options) {
     this.spanner = spanner;
     this.tracer = spanner.getTracer();
@@ -475,7 +477,7 @@ class SessionImpl implements Session {
   }
 
   private Instant convert(com.google.protobuf.Timestamp timestamp) {
-    if(timestamp == null) {
+    if (timestamp == null) {
       return null;
     }
     return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());

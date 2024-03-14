@@ -127,8 +127,9 @@ public class SessionPoolOptions {
             this.inactiveTransactionRemovalOptions, other.inactiveTransactionRemovalOptions)
         && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock)
         && Objects.equals(this.useMultiplexedSession, other.useMultiplexedSession)
-        && Objects.equals(this.multiplexedSessionMaintenanceDuration,
-          other.multiplexedSessionMaintenanceDuration);
+        && Objects.equals(
+            this.multiplexedSessionMaintenanceDuration,
+            other.multiplexedSessionMaintenanceDuration);
   }
 
   @Override

@@ -83,6 +83,7 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
 
     @Param({"400"})
     int maxSessions;
+
     @Setup(Level.Iteration)
     public void setup() throws Exception {
       SpannerOptions options =
