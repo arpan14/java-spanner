@@ -24,24 +24,34 @@ import com.google.cloud.Timestamp;
 import com.google.cloud.Tuple;
 import com.google.cloud.spanner.Options.TransactionOption;
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 import com.google.cloud.spanner.SessionPool.PooledSessionFuture;
 >>>>>>> fc178f655 (chore: generalised SessionPoolAsyncTransactionManager.)
+=======
+import com.google.cloud.spanner.SessionPool.CachedSession;
+>>>>>>> b75f759f5 (chore: playing around by making SessionFuture an interface.)
 import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SessionPool.SessionNotFoundHandler;
 import com.google.cloud.spanner.SessionPool.SessionReplacementHandler;
 import com.google.cloud.spanner.TransactionContextFutureImpl.CommittableAsyncTransactionManager;
 import com.google.cloud.spanner.TransactionManager.TransactionState;
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.ForwardingListenableFuture.SimpleForwardingListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import javax.annotation.concurrent.GuardedBy;
 
+<<<<<<< HEAD
 class SessionPoolAsyncTransactionManager<I extends SessionFuture>
 <<<<<<< HEAD
     implements CommittableAsyncTransactionManager, SessionNotFoundHandler {
 =======
     implements CommittableAsyncTransactionManager {
 >>>>>>> fc178f655 (chore: generalised SessionPoolAsyncTransactionManager.)
+=======
+class SessionPoolAsyncTransactionManager<I extends SimpleForwardingListenableFuture<CachedSession>
+    & SessionFuture> implements CommittableAsyncTransactionManager {
+>>>>>>> b75f759f5 (chore: playing around by making SessionFuture an interface.)
   private final Object lock = new Object();
 
   @GuardedBy("lock")
@@ -121,8 +131,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
         new ApiFutureCallback<AsyncTransactionManagerImpl>() {
           @Override
           public void onFailure(Throwable t) {
-            // TODO arpanmishra@ can we avoid the need of this typecasting?
-            ((Session) session).close();
+            session.close();
           }
 
           @Override
@@ -137,7 +146,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
 
                   @Override
                   public void onSuccess(Void result) {
-                    ((Session) session).close();
+                    session.close();
                     res.set(result);
                   }
                 },

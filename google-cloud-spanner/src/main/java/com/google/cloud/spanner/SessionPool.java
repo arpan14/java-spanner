@@ -170,7 +170,8 @@ class SessionPool {
    * Wrapper around {@code ReadContext} that releases the session to the pool once the call is
    * finished, if it is a single use context.
    */
-  private static class AutoClosingReadContext<I extends SessionFuture, T extends ReadContext>
+  private static class AutoClosingReadContext<I extends SimpleForwardingListenableFuture<CachedSession>
+      & SessionFuture, T extends ReadContext>
       implements ReadContext {
     /**
      * {@link AsyncResultSet} implementation that keeps track of the async operations that are still
@@ -543,14 +544,15 @@ class SessionPool {
           if (readContextDelegate != null) {
             readContextDelegate.close();
           }
-          ((Session) session).close();
+          session.close();
           delegateClosed = true;
         }
       }
     }
   }
 
-  private static class AutoClosingReadTransaction<I extends SessionFuture>
+  private static class AutoClosingReadTransaction<I extends
+      SimpleForwardingListenableFuture<CachedSession> & SessionFuture>
       extends AutoClosingReadContext<I, ReadOnlyTransaction> implements ReadOnlyTransaction {
 
     AutoClosingReadTransaction(
@@ -718,27 +720,27 @@ class SessionPool {
     @Override
     public ResultSet read(
         String table, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new SessionPoolResultSet(handler, delegate.read(table, keys, columns, options));
+      return new SessionPoolResultSet<>(handler, delegate.read(table, keys, columns, options));
     }
 
     @Override
     public AsyncResultSet readAsync(
         String table, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new AsyncSessionPoolResultSet(
+      return new AsyncSessionPoolResultSet<>(
           handler, delegate.readAsync(table, keys, columns, options));
     }
 
     @Override
     public ResultSet readUsingIndex(
         String table, String index, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new SessionPoolResultSet(
+      return new SessionPoolResultSet<>(
           handler, delegate.readUsingIndex(table, index, keys, columns, options));
     }
 
     @Override
     public AsyncResultSet readUsingIndexAsync(
         String table, String index, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new AsyncSessionPoolResultSet(
+      return new AsyncSessionPoolResultSet<>(
           handler, delegate.readUsingIndexAsync(table, index, keys, columns, options));
     }
 
@@ -866,17 +868,17 @@ class SessionPool {
 
     @Override
     public ResultSet executeQuery(Statement statement, QueryOption... options) {
-      return new SessionPoolResultSet(handler, delegate.executeQuery(statement, options));
+      return new SessionPoolResultSet<>(handler, delegate.executeQuery(statement, options));
     }
 
     @Override
     public AsyncResultSet executeQueryAsync(Statement statement, QueryOption... options) {
-      return new AsyncSessionPoolResultSet(handler, delegate.executeQueryAsync(statement, options));
+      return new AsyncSessionPoolResultSet<>(handler, delegate.executeQueryAsync(statement, options));
     }
 
     @Override
     public ResultSet analyzeQuery(Statement statement, QueryAnalyzeMode queryMode) {
-      return new SessionPoolResultSet(handler, delegate.analyzeQuery(statement, queryMode));
+      return new SessionPoolResultSet<>(handler, delegate.analyzeQuery(statement, queryMode));
     }
 
     @Override
@@ -920,7 +922,7 @@ class SessionPool {
     }
 
     private TransactionContext internalBegin() {
-      TransactionContext res = new SessionPoolTransactionContext(
+      TransactionContext res = new SessionPoolTransactionContext<>(
           sessionNotFoundHandler, delegate.begin());
       try {
         session.get().markUsed();
@@ -956,9 +958,13 @@ class SessionPool {
       try {
         delegate.commit();
       } catch (SessionNotFoundException e) {
-        Tuple<SessionFuture, SpannerException> tuple =
+        Tuple<T, SpannerException> tuple =
             sessionNotFoundHandler.handleSessionNotFound(e);
-        this.delegate = ((Session) tuple.x()).transactionManager(options);
+        try {
+          this.delegate = tuple.x().get().transactionManager(options);
+        } catch (InterruptedException | ExecutionException ex) {
+          // this exception will not be thrown
+        }
         restartedAfterSessionNotFound = true;
       } finally {
         if (getState() != TransactionState.ABORTED) {
@@ -981,12 +987,12 @@ class SessionPool {
       while (true) {
         try {
           if (restartedAfterSessionNotFound) {
-            TransactionContext res = new SessionPoolTransactionContext(sessionNotFoundHandler,
+            TransactionContext res = new SessionPoolTransactionContext<>(sessionNotFoundHandler,
                 delegate.begin());
             restartedAfterSessionNotFound = false;
             return res;
           } else {
-            return new SessionPoolTransactionContext(sessionNotFoundHandler,
+            return new SessionPoolTransactionContext<>(sessionNotFoundHandler,
                 delegate.resetForRetry());
           }
         } catch (SessionNotFoundException e) {
@@ -1019,7 +1025,7 @@ class SessionPool {
           delegate.close();
         }
       } finally {
-        ((Session) session).close();
+        session.close();
       }
     }
 
@@ -1039,7 +1045,6 @@ class SessionPool {
    */
   private static final class SessionPoolTransactionRunner<I extends SessionFuture>
       implements TransactionRunner {
-
     private I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
@@ -1091,7 +1096,7 @@ class SessionPool {
         session.get().setLastException(e);
         throw e;
       } finally {
-        ((Session) session).close();
+        session.close();
       }
     }
 
@@ -1112,7 +1117,8 @@ class SessionPool {
     }
   }
 
-  private static class SessionPoolAsyncRunner<I extends SessionFuture> implements AsyncRunner {
+  private static class SessionPoolAsyncRunner<I extends SimpleForwardingListenableFuture<CachedSession>
+      & SessionFuture> implements AsyncRunner {
     private volatile I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
@@ -1173,7 +1179,7 @@ class SessionPool {
             } catch (InterruptedException | ExecutionException e) {
               // this exception will never be thrown
             }
-            ((Session) session).close();
+            session.close();
             setCommitResponse(runner);
             if (exception != null) {
               res.setException(exception);
@@ -1526,7 +1532,8 @@ class SessionPool {
     }
   }
 
-  class MultiplexedSessionFuture extends SessionFuture implements Session {
+  class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<CachedSession>
+      implements SessionFuture {
 
     private volatile CountDownLatch initialized = new CountDownLatch(1);
     private final ISpan span;
@@ -1662,7 +1669,7 @@ class SessionPool {
       try {
         final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler
             = new MultiplexedSessionNotFoundHandler();
-        return new AutoClosingReadTransaction(
+        return new AutoClosingReadTransaction<>(
             transactionSupplier, SessionPool.this, sessionNotFoundHandler, this, isSingleUse);
       } catch (Exception e) {
         close();
@@ -1673,25 +1680,25 @@ class SessionPool {
     @Override
     public TransactionRunner readWriteTransaction(TransactionOption... options) {
       final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
-      return new SessionPoolTransactionRunner(this, sessionNotFoundHandler, options);
+      return new SessionPoolTransactionRunner<>(this, sessionNotFoundHandler, options);
     }
 
     @Override
     public TransactionManager transactionManager(TransactionOption... options) {
-      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
-      return new AutoClosingTransactionManager(this, sessionNotFoundHandler, options);
+      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new AutoClosingTransactionManager<>(this, sessionNotFoundHandler, options);
     }
 
     @Override
     public AsyncRunner runAsync(TransactionOption... options) {
-      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
       return new SessionPoolAsyncRunner(this, sessionNotFoundHandler, options);
     }
 
     @Override
     public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
-      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
-      return new SessionPoolAsyncTransactionManager(sessionNotFoundHandler, this, options);
+      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
+      return new SessionPoolAsyncTransactionManager<MultiplexedSessionFuture>(sessionNotFoundHandler, this, options);
     }
 
     @Override
@@ -2995,8 +3002,8 @@ class SessionPool {
       poolMaintainer.init();
       if (options.getMinSessions() > 0) {
         createSessions(options.getMinSessions(), true);
+        createMultiplexedSessions();
       }
-      createMultiplexedSessions();
     }
   }
 
