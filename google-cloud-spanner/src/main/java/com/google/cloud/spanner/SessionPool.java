@@ -962,10 +962,11 @@ class SessionPool {
             sessionNotFoundHandler.handleSessionNotFound(e);
         try {
           this.delegate = tuple.x().get().transactionManager(options);
+          restartedAfterSessionNotFound = true;
+          throw tuple.y();
         } catch (InterruptedException | ExecutionException ex) {
           // this exception will not be thrown
         }
-        restartedAfterSessionNotFound = true;
       } finally {
         if (getState() != TransactionState.ABORTED) {
           close();
