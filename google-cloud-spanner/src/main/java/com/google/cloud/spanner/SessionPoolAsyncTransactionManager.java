@@ -23,18 +23,15 @@ import com.google.api.core.SettableApiFuture;
 import com.google.cloud.Timestamp;
 import com.google.cloud.Tuple;
 import com.google.cloud.spanner.Options.TransactionOption;
-import com.google.cloud.spanner.SessionPool.CachedSession;
 import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SessionPool.SessionNotFoundHandler;
 import com.google.cloud.spanner.TransactionContextFutureImpl.CommittableAsyncTransactionManager;
 import com.google.cloud.spanner.TransactionManager.TransactionState;
 import com.google.common.base.Preconditions;
-import com.google.common.util.concurrent.ForwardingListenableFuture.SimpleForwardingListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import javax.annotation.concurrent.GuardedBy;
 
-class SessionPoolAsyncTransactionManager<
-        I extends SimpleForwardingListenableFuture<CachedSession> & SessionFuture>
+class SessionPoolAsyncTransactionManager<I extends SessionFuture>
     implements CommittableAsyncTransactionManager {
   private final Object lock = new Object();
 

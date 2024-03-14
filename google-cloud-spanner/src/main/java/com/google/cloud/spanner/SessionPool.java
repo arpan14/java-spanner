@@ -1166,6 +1166,8 @@ class SessionPool {
      * @return
      */
     CachedSession get();
+
+    default void addListener(Runnable listener, Executor exec) {}
   }
 
   class PooledSessionFuture extends SimpleForwardingListenableFuture<CachedSession>
