@@ -1154,6 +1154,17 @@ class SessionPool {
   }
 
   interface SessionFuture extends Session {
+
+    /**
+     * We need to do this because every implementation of {@link SessionFuture} today extends {@link
+     * SimpleForwardingListenableFuture}. The get() method in parent {@link Future} classes
+     * specifies checked exceptions in method signature.
+     *
+     * <p>This method is a workaround we don't have to handle checked exceptions specified by other
+     * interfaces.
+     *
+     * @return
+     */
     CachedSession get();
   }
 
