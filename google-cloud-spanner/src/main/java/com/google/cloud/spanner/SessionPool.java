@@ -49,7 +49,6 @@ import com.google.api.core.SettableApiFuture;
 import com.google.api.gax.core.ExecutorProvider;
 import com.google.api.gax.rpc.ServerStream;
 import com.google.cloud.Timestamp;
-import com.google.cloud.Tuple;
 import com.google.cloud.grpc.GrpcTransportOptions;
 import com.google.cloud.grpc.GrpcTransportOptions.ExecutorFactory;
 import com.google.cloud.spanner.Options.QueryOption;
@@ -148,7 +147,6 @@ class SessionPool {
   }
 
   private abstract static class CachedResultSetSupplier implements Supplier<ResultSet> {
-
     private ResultSet cached;
 
     abstract ResultSet load();
@@ -238,7 +236,6 @@ class SessionPool {
       this.sessionReplacementHandler = sessionReplacementHandler;
       this.session = session;
       this.isSingleUse = isSingleUse;
-      this.sessionNotFoundHandler = sessionNotFoundHandler;
     }
 
     T getReadContextDelegate() {
@@ -560,6 +557,35 @@ class SessionPool {
     T replaceSession(SessionNotFoundException notFound, T sessionFuture);
   }
 
+  class MultiplexedSessionReplacementHandler
+      implements SessionReplacementHandler<MultiplexedSessionFuture> {
+    @Override
+    public MultiplexedSessionFuture replaceSession(
+        SessionNotFoundException e, MultiplexedSessionFuture session) {
+      // TODO arpanmishra add this handling
+      return null;
+    }
+  }
+
+  class PooledSessionReplacementHandler implements SessionReplacementHandler<PooledSessionFuture> {
+    @Override
+    public PooledSessionFuture replaceSession(
+        SessionNotFoundException e, PooledSessionFuture session) {
+      if (!options.isFailIfSessionNotFound() && session.get().isAllowReplacing()) {
+        synchronized (lock) {
+          numSessionsInUse--;
+          numSessionsReleased++;
+          checkedOutSessions.remove(session);
+        }
+        session.leakedException = null;
+        invalidateSession((PooledSession) session.get());
+        return getSession();
+      } else {
+        throw e;
+      }
+    }
+  }
+
   class PooledSessionReplacementHandler implements SessionReplacementHandler<PooledSessionFuture> {
     @Override
     public PooledSessionFuture replaceSession(
@@ -584,51 +610,21 @@ class SessionPool {
      * Handles the given {@link SessionNotFoundException} by possibly converting it to a different
      * exception that should be thrown.
      */
-    Tuple<I, SpannerException> handleSessionNotFound(SessionNotFoundException notFound);
-
-    default SpannerException createAbortedExceptionWithMinimalRetryDelay(
-        SessionNotFoundException notFoundException) {
-      return SpannerExceptionFactory.newSpannerException(
-          ErrorCode.ABORTED,
-          notFoundException.getMessage(),
-          SpannerExceptionFactory.createAbortedExceptionWithRetryDelay(
-              notFoundException.getMessage(), notFoundException, 0, 1));
-    }
+    SpannerException handleSessionNotFound(SessionNotFoundException notFound);
   }
 
-  class PooledSessionNotFoundHandler implements SessionNotFoundHandler<PooledSessionFuture> {
-
-    private final SessionPool sessionPool;
-    private PooledSessionFuture session;
-
-    public PooledSessionNotFoundHandler(SessionPool sessionPool, PooledSessionFuture session) {
-      this.sessionPool = sessionPool;
-      this.session = session;
-    }
-
-    @Override
-    public Tuple<PooledSessionFuture, SpannerException> handleSessionNotFound(
-        SessionNotFoundException notFound) {
-      session = sessionPool.replaceSession(notFound, session);
-      return Tuple.of(session, createAbortedExceptionWithMinimalRetryDelay(notFound));
-    }
-  }
-
-  class MultiplexedSessionNotFoundHandler
-      implements SessionNotFoundHandler<MultiplexedSessionFuture> {
+  class MultiplexedSessionNotFoundHandler implements SessionNotFoundHandler {
 
     public MultiplexedSessionNotFoundHandler() {}
 
     @Override
-    public Tuple<MultiplexedSessionFuture, SpannerException> handleSessionNotFound(
-        SessionNotFoundException notFound) {
+    public SpannerException handleSessionNotFound(SessionNotFoundException notFound) {
       return null;
     }
   }
 
-  static class SessionPoolResultSet<I extends SessionFuture> extends ForwardingResultSet {
-
-    private final SessionNotFoundHandler<I> handler;
+  static class SessionPoolResultSet extends ForwardingResultSet {
+    private final SessionNotFoundHandler handler;
 
     private SessionPoolResultSet(SessionNotFoundHandler handler, ResultSet delegate) {
       super(delegate);
@@ -640,14 +636,13 @@ class SessionPool {
       try {
         return super.next();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
   }
 
-  static class AsyncSessionPoolResultSet<I extends SessionFuture> extends ForwardingAsyncResultSet {
-
-    private final SessionNotFoundHandler<I> handler;
+  static class AsyncSessionPoolResultSet extends ForwardingAsyncResultSet {
+    private final SessionNotFoundHandler handler;
 
     private AsyncSessionPoolResultSet(SessionNotFoundHandler handler, AsyncResultSet delegate) {
       super(delegate);
@@ -662,7 +657,7 @@ class SessionPool {
             try {
               return callback.cursorReady(resultSet);
             } catch (SessionNotFoundException e) {
-              throw handler.handleSessionNotFound(e).y();
+              throw handler.handleSessionNotFound(e);
             }
           });
     }
@@ -672,7 +667,7 @@ class SessionPool {
       try {
         return super.next();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -681,7 +676,7 @@ class SessionPool {
       try {
         return super.tryNext();
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
   }
@@ -693,10 +688,8 @@ class SessionPool {
    * throws an {@link AbortedException} to trigger the retry-loop that has been created by the
    * caller.
    */
-  static class SessionPoolTransactionContext<I extends SessionFuture>
-      implements TransactionContext {
-
-    private final SessionNotFoundHandler<I> handler;
+  static class SessionPoolTransactionContext implements TransactionContext {
+    private final SessionNotFoundHandler handler;
     final TransactionContext delegate;
 
     SessionPoolTransactionContext(SessionNotFoundHandler handler, TransactionContext delegate) {
@@ -707,27 +700,27 @@ class SessionPool {
     @Override
     public ResultSet read(
         String table, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new SessionPoolResultSet<>(handler, delegate.read(table, keys, columns, options));
+      return new SessionPoolResultSet(handler, delegate.read(table, keys, columns, options));
     }
 
     @Override
     public AsyncResultSet readAsync(
         String table, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new AsyncSessionPoolResultSet<>(
+      return new AsyncSessionPoolResultSet(
           handler, delegate.readAsync(table, keys, columns, options));
     }
 
     @Override
     public ResultSet readUsingIndex(
         String table, String index, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new SessionPoolResultSet<>(
+      return new SessionPoolResultSet(
           handler, delegate.readUsingIndex(table, index, keys, columns, options));
     }
 
     @Override
     public AsyncResultSet readUsingIndexAsync(
         String table, String index, KeySet keys, Iterable<String> columns, ReadOption... options) {
-      return new AsyncSessionPoolResultSet<>(
+      return new AsyncSessionPoolResultSet(
           handler, delegate.readUsingIndexAsync(table, index, keys, columns, options));
     }
 
@@ -736,7 +729,7 @@ class SessionPool {
       try {
         return delegate.readRow(table, key, columns);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -747,7 +740,7 @@ class SessionPool {
             AbstractReadContext.consumeSingleRowAsync(rs),
             SessionNotFoundException.class,
             input -> {
-              throw handler.handleSessionNotFound(input).y();
+              throw handler.handleSessionNotFound(input);
             },
             MoreExecutors.directExecutor());
       }
@@ -768,7 +761,7 @@ class SessionPool {
       try {
         return delegate.readRowUsingIndex(table, index, key, columns);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -780,7 +773,7 @@ class SessionPool {
             AbstractReadContext.consumeSingleRowAsync(rs),
             SessionNotFoundException.class,
             input -> {
-              throw handler.handleSessionNotFound(input).y();
+              throw handler.handleSessionNotFound(input);
             },
             MoreExecutors.directExecutor());
       }
@@ -808,7 +801,7 @@ class SessionPool {
       try {
         return delegate.analyzeUpdateStatement(statement, analyzeMode, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -817,7 +810,7 @@ class SessionPool {
       try {
         return delegate.executeUpdate(statement, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -827,7 +820,7 @@ class SessionPool {
           delegate.executeUpdateAsync(statement, options),
           SessionNotFoundException.class,
           input -> {
-            throw handler.handleSessionNotFound(input).y();
+            throw handler.handleSessionNotFound(input);
           },
           MoreExecutors.directExecutor());
     }
@@ -837,7 +830,7 @@ class SessionPool {
       try {
         return delegate.batchUpdate(statements, options);
       } catch (SessionNotFoundException e) {
-        throw handler.handleSessionNotFound(e).y();
+        throw handler.handleSessionNotFound(e);
       }
     }
 
@@ -848,25 +841,24 @@ class SessionPool {
           delegate.batchUpdateAsync(statements, options),
           SessionNotFoundException.class,
           input -> {
-            throw handler.handleSessionNotFound(input).y();
+            throw handler.handleSessionNotFound(input);
           },
           MoreExecutors.directExecutor());
     }
 
     @Override
     public ResultSet executeQuery(Statement statement, QueryOption... options) {
-      return new SessionPoolResultSet<>(handler, delegate.executeQuery(statement, options));
+      return new SessionPoolResultSet(handler, delegate.executeQuery(statement, options));
     }
 
     @Override
     public AsyncResultSet executeQueryAsync(Statement statement, QueryOption... options) {
-      return new AsyncSessionPoolResultSet<>(
-          handler, delegate.executeQueryAsync(statement, options));
+      return new AsyncSessionPoolResultSet(handler, delegate.executeQueryAsync(statement, options));
     }
 
     @Override
     public ResultSet analyzeQuery(Statement statement, QueryAnalyzeMode queryMode) {
-      return new SessionPoolResultSet<>(handler, delegate.analyzeQuery(statement, queryMode));
+      return new SessionPoolResultSet(handler, delegate.analyzeQuery(statement, queryMode));
     }
 
     @Override
@@ -902,8 +894,7 @@ class SessionPool {
     }
 
     private TransactionContext internalBegin() {
-      TransactionContext res =
-          new SessionPoolTransactionContext<>(sessionNotFoundHandler, delegate.begin());
+      TransactionContext res = new SessionPoolTransactionContext(this, delegate.begin());
       session.get().markUsed();
       return res;
     }
@@ -931,10 +922,7 @@ class SessionPool {
       try {
         delegate.commit();
       } catch (SessionNotFoundException e) {
-        Tuple<T, SpannerException> tuple = sessionNotFoundHandler.handleSessionNotFound(e);
-        this.delegate = tuple.x().get().transactionManager(options);
-        restartedAfterSessionNotFound = true;
-        throw tuple.y();
+        throw handleSessionNotFound(e);
       } finally {
         if (getState() != TransactionState.ABORTED) {
           close();
@@ -956,13 +944,11 @@ class SessionPool {
       while (true) {
         try {
           if (restartedAfterSessionNotFound) {
-            TransactionContext res =
-                new SessionPoolTransactionContext<>(sessionNotFoundHandler, delegate.begin());
+            TransactionContext res = new SessionPoolTransactionContext(this, delegate.begin());
             restartedAfterSessionNotFound = false;
             return res;
           } else {
-            return new SessionPoolTransactionContext<>(
-                sessionNotFoundHandler, delegate.resetForRetry());
+            return new SessionPoolTransactionContext(this, delegate.resetForRetry());
           }
         } catch (SessionNotFoundException e) {
           session = sessionReplacementHandler.replaceSession(e, session);
@@ -1017,7 +1003,6 @@ class SessionPool {
     private I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
-    private final SessionNotFoundHandler<I> sessionNotFoundHandler;
     private TransactionRunner runner;
 
     private SessionPoolTransactionRunner(
@@ -1082,7 +1067,6 @@ class SessionPool {
     private volatile I session;
     private final SessionReplacementHandler<I> sessionReplacementHandler;
     private final TransactionOption[] options;
-    private final SessionNotFoundHandler<I> sessionNotFoundHandler;
     private SettableApiFuture<CommitResponse> commitResponse;
 
     private SessionPoolAsyncRunner(
@@ -1121,9 +1105,8 @@ class SessionPool {
                     // The replaceSession method will re-throw the SessionNotFoundException if the
                     // session cannot be replaced with a new one.
                     session =
-                        sessionNotFoundHandler
-                            .handleSessionNotFound((SessionNotFoundException) se)
-                            .x();
+                        sessionReplacementHandler.replaceSession(
+                            (SessionNotFoundException) se, session);
                     se = null;
                   } catch (SessionNotFoundException e) {
                     exception = e;
@@ -1172,7 +1155,6 @@ class SessionPool {
   // Exception class used just to track the stack trace at the point when a session was handed out
   // from the pool.
   final class LeakedSessionException extends RuntimeException {
-
     private static final long serialVersionUID = 1451131180314064914L;
 
     private LeakedSessionException() {
@@ -1282,8 +1264,6 @@ class SessionPool {
     @Override
     public ReadContext singleUse() {
       try {
-        final SessionNotFoundHandler sessionNotFoundHandler =
-            new PooledSessionNotFoundHandler(SessionPool.this, this);
         return new AutoClosingReadContext<>(
             session -> {
               CachedSession ps = session.get();
@@ -1302,8 +1282,6 @@ class SessionPool {
     @Override
     public ReadContext singleUse(final TimestampBound bound) {
       try {
-        final SessionNotFoundHandler sessionNotFoundHandler =
-            new PooledSessionNotFoundHandler(SessionPool.this, this);
         return new AutoClosingReadContext<>(
             session -> {
               CachedSession ps = session.get();
@@ -1541,15 +1519,13 @@ class SessionPool {
     @Override
     public ReadContext singleUse() {
       try {
-        final SessionNotFoundHandler sessionNotFoundHandler =
-            new MultiplexedSessionNotFoundHandler();
         return new AutoClosingReadContext<>(
             session -> {
               CachedSession ps = session.get();
               return ps.getDelegate().singleUse();
             },
             SessionPool.this,
-            sessionNotFoundHandler,
+            multiplexedSessionReplacementHandler,
             this,
             true);
       } catch (Exception e) {
@@ -1561,15 +1537,13 @@ class SessionPool {
     @Override
     public ReadContext singleUse(final TimestampBound bound) {
       try {
-        final SessionNotFoundHandler sessionNotFoundHandler =
-            new MultiplexedSessionNotFoundHandler();
         return new AutoClosingReadContext<>(
             session -> {
               CachedSession ps = session.get();
               return ps.getDelegate().singleUse(bound);
             },
             SessionPool.this,
-            sessionNotFoundHandler,
+            multiplexedSessionReplacementHandler,
             this,
             true);
       } catch (Exception e) {
@@ -1622,10 +1596,12 @@ class SessionPool {
         Function<MultiplexedSessionFuture, ReadOnlyTransaction> transactionSupplier,
         boolean isSingleUse) {
       try {
-        final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler =
-            new MultiplexedSessionNotFoundHandler();
         return new AutoClosingReadTransaction<>(
-            transactionSupplier, SessionPool.this, sessionNotFoundHandler, this, isSingleUse);
+            transactionSupplier,
+            SessionPool.this,
+            multiplexedSessionReplacementHandler,
+            this,
+            isSingleUse);
       } catch (Exception e) {
         close();
         throw e;
@@ -1634,30 +1610,25 @@ class SessionPool {
 
     @Override
     public TransactionRunner readWriteTransaction(TransactionOption... options) {
-      final SessionNotFoundHandler sessionNotFoundHandler = new MultiplexedSessionNotFoundHandler();
-      return new SessionPoolTransactionRunner<>(this, sessionNotFoundHandler, options);
+      return new SessionPoolTransactionRunner<>(
+          this, multiplexedSessionReplacementHandler, options);
     }
 
     @Override
     public TransactionManager transactionManager(TransactionOption... options) {
-      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler =
-          new MultiplexedSessionNotFoundHandler();
-      return new AutoClosingTransactionManager<>(this, sessionNotFoundHandler, options);
+      return new AutoClosingTransactionManager<>(
+          this, multiplexedSessionReplacementHandler, options);
     }
 
     @Override
     public AsyncRunner runAsync(TransactionOption... options) {
-      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler =
-          new MultiplexedSessionNotFoundHandler();
-      return new SessionPoolAsyncRunner(this, sessionNotFoundHandler, options);
+      return new SessionPoolAsyncRunner(this, multiplexedSessionReplacementHandler, options);
     }
 
     @Override
     public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
-      final SessionNotFoundHandler<MultiplexedSessionFuture> sessionNotFoundHandler =
-          new MultiplexedSessionNotFoundHandler();
-      return new SessionPoolAsyncTransactionManager<MultiplexedSessionFuture>(
-          sessionNotFoundHandler, this, options);
+      return new SessionPoolAsyncTransactionManager<>(
+          multiplexedSessionReplacementHandler, this, options);
     }
 
     @Override
@@ -2553,13 +2524,14 @@ class SessionPool {
 
     void maintainMultiplexedSession(Instant currentTime) {
       try {
-        if(options.getUseMultiplexedSession()) {
+        if (options.getUseMultiplexedSession()) {
           Iterator<MultiplexedSession> iterator = multiplexedSessions.iterator();
           while (iterator.hasNext()) {
             final MultiplexedSession session = iterator.next();
             final Duration durationFromCreationTime =
                 Duration.between(session.getDelegate().getCreateTime(), currentTime);
-            if (durationFromCreationTime.compareTo(options.getMultiplexedSessionMaintenanceDuration())
+            if (durationFromCreationTime.compareTo(
+                    options.getMultiplexedSessionMaintenanceDuration())
                 > 0) {
               logger.log(
                   Level.INFO,
@@ -2714,6 +2686,8 @@ class SessionPool {
   private final CountDownLatch waitOnMinSessionsLatch;
   private final SessionReplacementHandler pooledSessionReplacementHandler =
       new PooledSessionReplacementHandler();
+  private final SessionReplacementHandler multiplexedSessionReplacementHandler =
+      new MultiplexedSessionReplacementHandler();
 
   /**
    * Create a session pool with the given options and for the given database. It will also start
@@ -2881,6 +2855,10 @@ class SessionPool {
     return pooledSessionReplacementHandler;
   }
 
+  SessionReplacementHandler getMultiplexedSessionReplacementHandler() {
+    return multiplexedSessionReplacementHandler;
+  }
+
   @Nullable
   public String getDatabaseRole() {
     return databaseRole;
@@ -2953,7 +2931,9 @@ class SessionPool {
       poolMaintainer.init();
       if (options.getMinSessions() > 0) {
         createSessions(options.getMinSessions(), true);
-        createMultiplexedSessions();
+        if (options.getUseMultiplexedSession()) {
+          createMultiplexedSessions();
+        }
       }
     }
   }

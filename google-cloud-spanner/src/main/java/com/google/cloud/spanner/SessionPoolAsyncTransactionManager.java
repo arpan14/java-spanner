@@ -21,10 +21,10 @@ import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
 import com.google.api.core.SettableApiFuture;
 import com.google.cloud.Timestamp;
-import com.google.cloud.Tuple;
 import com.google.cloud.spanner.Options.TransactionOption;
 import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SessionPool.SessionNotFoundHandler;
+import com.google.cloud.spanner.SessionPool.SessionReplacementHandler;
 import com.google.cloud.spanner.TransactionContextFutureImpl.CommittableAsyncTransactionManager;
 import com.google.cloud.spanner.TransactionManager.TransactionState;
 import com.google.common.base.Preconditions;
@@ -32,7 +32,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import javax.annotation.concurrent.GuardedBy;
 
 class SessionPoolAsyncTransactionManager<I extends SessionFuture>
-    implements CommittableAsyncTransactionManager {
+    implements CommittableAsyncTransactionManager, SessionNotFoundHandler {
   private final Object lock = new Object();
 
   @GuardedBy("lock")
@@ -41,16 +41,18 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
   @GuardedBy("lock")
   private AbortedException abortedException;
 
-  private final SessionNotFoundHandler<I> sessionNotFoundHandler;
+  private final SessionReplacementHandler<I> sessionReplacementHandler;
   private final TransactionOption[] options;
   private volatile I session;
   private volatile SettableApiFuture<AsyncTransactionManagerImpl> delegate;
   private boolean restartedAfterSessionNotFound;
 
   SessionPoolAsyncTransactionManager(
-      SessionNotFoundHandler<I> sessionNotFoundHandler, I session, TransactionOption... options) {
+      SessionReplacementHandler<I> sessionReplacementHandler,
+      I session,
+      TransactionOption... options) {
     this.options = options;
-    this.sessionNotFoundHandler = sessionNotFoundHandler;
+    this.sessionReplacementHandler = sessionReplacementHandler;
     createTransaction(session);
   }
 
@@ -72,14 +74,14 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
         MoreExecutors.directExecutor());
   }
 
-  // TODO arpanmishra@ - How will this method be invoked
+  @Override
   public SpannerException handleSessionNotFound(SessionNotFoundException notFound) {
     // Restart the entire transaction with a new session and throw an AbortedException to force the
     // client application to retry.
-    Tuple<I, SpannerException> tuple = sessionNotFoundHandler.handleSessionNotFound(notFound);
-    createTransaction(tuple.x());
+    createTransaction(sessionReplacementHandler.replaceSession(notFound, session));
     restartedAfterSessionNotFound = true;
-    return tuple.y();
+    return SpannerExceptionFactory.newSpannerException(
+        ErrorCode.ABORTED, notFound.getMessage(), notFound);
   }
 
   @Override
@@ -150,7 +152,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
                   public void onSuccess(TransactionContext result) {
                     delegateTxnFuture.set(
                         new SessionPool.SessionPoolTransactionContext(
-                            sessionNotFoundHandler, result));
+                            SessionPoolAsyncTransactionManager.this, result));
                   }
                 },
                 MoreExecutors.directExecutor());
@@ -225,7 +227,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
         delegate,
         input -> {
           ApiFuture<Void> res = input.rollbackAsync();
-          res.addListener(() -> ((Session) session).close(), MoreExecutors.directExecutor());
+          res.addListener(() -> session.close(), MoreExecutors.directExecutor());
           return res;
         },
         MoreExecutors.directExecutor());
@@ -252,7 +254,9 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
                   return input.resetForRetryAsync();
                 },
                 MoreExecutors.directExecutor()),
-            input -> new SessionPool.SessionPoolTransactionContext(sessionNotFoundHandler, input),
+            input ->
+                new SessionPool.SessionPoolTransactionContext(
+                    SessionPoolAsyncTransactionManager.this, input),
             MoreExecutors.directExecutor()));
   }
 
