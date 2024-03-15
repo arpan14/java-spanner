@@ -367,6 +367,6 @@ class SessionClient implements AutoCloseable {
     synchronized (this) {
       options = optionMap(SessionOption.channelHint(sessionChannelCounter++));
     }
-    return new SessionImpl(spanner, name, null, options);
+    return new SessionImpl(spanner, name, options);
   }
 }
