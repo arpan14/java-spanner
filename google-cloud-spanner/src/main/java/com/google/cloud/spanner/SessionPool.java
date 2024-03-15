@@ -1009,7 +1009,6 @@ class SessionPool {
         session.get().markUsed();
         return result;
       } catch (SpannerException e) {
-        // TODO arpanmishra@ validate if the right exception is being thrown
         session.get().setLastException(e);
         throw e;
       } finally {
@@ -2500,35 +2499,37 @@ class SessionPool {
 
     void maintainMultiplexedSession(Instant currentTime) {
       try {
-        Iterator<MultiplexedSession> iterator = multiplexedSessions.iterator();
-        while (iterator.hasNext()) {
-          final MultiplexedSession session = iterator.next();
-          final Duration durationFromCreationTime =
-              Duration.between(session.getDelegate().getCreateTime(), currentTime);
-          if (durationFromCreationTime.compareTo(options.getMultiplexedSessionMaintenanceDuration())
-              > 0) {
-            logger.log(
-                Level.INFO,
-                String.format(
-                    "Replacing Multiplexed Session => %s created "
-                        + "before maintenance window => %s",
-                    session.getName(), options.getMultiplexedSessionMaintenanceDuration()));
-            createMultiplexedSessions();
-          }
-
-          // TODO arpanmishra@ this should take a lock?
-          // TODO can we add a more efficient implementation of queue that only locks the front
-          // of the queue
-          if (multiplexedSessions.size() > 1) {
-            final MultiplexedSession lastSession = multiplexedSessions.peekLast();
-            final int rpcCount = lastSession.getActiveRPCCount();
-            if (lastSession.getActiveRPCCount() <= 0) {
+        if(options.getUseMultiplexedSession()) {
+          Iterator<MultiplexedSession> iterator = multiplexedSessions.iterator();
+          while (iterator.hasNext()) {
+            final MultiplexedSession session = iterator.next();
+            final Duration durationFromCreationTime =
+                Duration.between(session.getDelegate().getCreateTime(), currentTime);
+            if (durationFromCreationTime.compareTo(options.getMultiplexedSessionMaintenanceDuration())
+                > 0) {
               logger.log(
                   Level.INFO,
                   String.format(
-                      "Removed Multiplexed Session => %s with " + "RPC count => %s ",
-                      lastSession.getName(), rpcCount));
-              multiplexedSessions.pollLast();
+                      "Replacing Multiplexed Session => %s created "
+                          + "before maintenance window => %s",
+                      session.getName(), options.getMultiplexedSessionMaintenanceDuration()));
+              createMultiplexedSessions();
+            }
+
+            // TODO arpanmishra@ this should take a lock?
+            // TODO can we add a more efficient implementation of queue that only locks the front
+            // of the queue
+            if (multiplexedSessions.size() > 1) {
+              final MultiplexedSession lastSession = multiplexedSessions.peekLast();
+              final int rpcCount = lastSession.getActiveRPCCount();
+              if (lastSession.getActiveRPCCount() <= 0) {
+                logger.log(
+                    Level.INFO,
+                    String.format(
+                        "Removed Multiplexed Session => %s with " + "RPC count => %s ",
+                        lastSession.getName(), rpcCount));
+                multiplexedSessions.pollLast();
+              }
             }
           }
         }
