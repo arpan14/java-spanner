@@ -754,6 +754,9 @@ abstract class AbstractReadContext
     // Note that transactions are invalidated under some circumstances on the backend, but we
     // implement the check more strictly here to encourage coding to contract rather than the
     // implementation.
+    checkState(
+        !session.getIsMultiplexed() && isValid,
+        "Context has been invalidated by a new operation on the session");
     checkState(!isClosed, "Context has been closed");
   }
 
