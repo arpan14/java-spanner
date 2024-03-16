@@ -70,7 +70,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(value = 1, warmups = 0)
 @Measurement(batchSize = 1, iterations = 1, timeUnit = TimeUnit.MILLISECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 1)
+@Warmup(iterations = 0)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
   @State(Scope.Thread)
