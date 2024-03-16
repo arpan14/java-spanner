@@ -48,7 +48,6 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
-import org.openjdk.jmh.annotations.Warmup;
 
 /**
  * Benchmarks for measuring existing latencies of various APIs using the Java Client. The benchmarks
@@ -70,7 +69,6 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(value = 1, warmups = 0)
 @Measurement(batchSize = 1, iterations = 1, timeUnit = TimeUnit.MILLISECONDS)
 @OutputTimeUnit(TimeUnit.SECONDS)
-@Warmup(iterations = 1)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
   @State(Scope.Thread)
