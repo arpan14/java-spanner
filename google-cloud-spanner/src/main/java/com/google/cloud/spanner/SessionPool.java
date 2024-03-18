@@ -613,16 +613,6 @@ class SessionPool {
     SpannerException handleSessionNotFound(SessionNotFoundException notFound);
   }
 
-  class MultiplexedSessionNotFoundHandler implements SessionNotFoundHandler {
-
-    public MultiplexedSessionNotFoundHandler() {}
-
-    @Override
-    public SpannerException handleSessionNotFound(SessionNotFoundException notFound) {
-      return null;
-    }
-  }
-
   static class SessionPoolResultSet extends ForwardingResultSet {
     private final SessionNotFoundHandler handler;
 
@@ -2855,10 +2845,6 @@ class SessionPool {
     return pooledSessionReplacementHandler;
   }
 
-  SessionReplacementHandler getMultiplexedSessionReplacementHandler() {
-    return multiplexedSessionReplacementHandler;
-  }
-
   @Nullable
   public String getDatabaseRole() {
     return databaseRole;
@@ -3008,12 +2994,15 @@ class SessionPool {
         throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
       }
       ISpan span = tracer.getCurrentSpan();
+      span.addAnnotation("Acquiring multiplexed session");
       synchronized (lock) {
         MultiplexedSession session = multiplexedSessions.peek();
         if (session != null) {
+          span.addAnnotation("Acquired multiplexed session");
           MultiplexedSession.ACTIVE_RPC_COUNT.incrementAndGet();
+          return createMultiplexedSessionFuture(Futures.immediateFuture(session), span);
         }
-        return createMultiplexedSessionFuture(Futures.immediateFuture(session), span);
+        // TODO arpanmishra what if there is no session initially
       }
     }
     return getSession();
