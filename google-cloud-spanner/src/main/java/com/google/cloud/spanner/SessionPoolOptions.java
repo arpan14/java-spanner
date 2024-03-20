@@ -69,6 +69,7 @@ public class SessionPoolOptions {
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
 
+  private final Duration waitForMultiplexedSession;
   private final boolean useMultiplexedSession;
   private final Duration multiplexedSessionMaintenanceDuration;
 
@@ -496,6 +497,7 @@ public class SessionPoolOptions {
     private boolean useMultiplexedSession = false;
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
     private Duration waitForMultiplexedSession = Duration.ofSeconds(10);
+
     private Clock poolMaintainerClock;
 
     private static Position getReleaseToPositionFromSystemProperty() {
