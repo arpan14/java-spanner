@@ -146,6 +146,26 @@ class SessionPool {
     }
   }
 
+  void waitOnMultiplexedSession() {
+    if (options.getUseMultiplexedSession()) {
+      final long timeoutNanos = options.getWaitForMultiplexedSession().toNanos();
+      if (timeoutNanos <= 0) {
+        return;
+      }
+
+      try {
+        if (!multiplexedSessionsInitialized.await(timeoutNanos, TimeUnit.NANOSECONDS)) {
+          final long timeoutMillis = options.getWaitForMultiplexedSession().toMillis();
+          throw SpannerExceptionFactory.newSpannerException(
+              ErrorCode.DEADLINE_EXCEEDED,
+              "Timed out after waiting " + timeoutMillis + "ms for multiplexed session creation");
+        }
+      } catch (InterruptedException e) {
+        throw SpannerExceptionFactory.propagateInterrupt(e);
+      }
+    }
+  }
+
   private abstract static class CachedResultSetSupplier implements Supplier<ResultSet> {
     private ResultSet cached;
 
@@ -1146,12 +1166,12 @@ class SessionPool {
   }
 
   private PooledSessionFuture createPooledSessionFuture(
-      ListenableFuture<CachedSession> future, ISpan span) {
+      ListenableFuture<PooledSession> future, ISpan span) {
     return new PooledSessionFuture(future, span);
   }
 
   private MultiplexedSessionFuture createMultiplexedSessionFuture(
-      ListenableFuture<CachedSession> future, ISpan span) {
+      ListenableFuture<MultiplexedSession> future, ISpan span) {
     return new MultiplexedSessionFuture(future, span);
   }
 
@@ -1159,8 +1179,8 @@ class SessionPool {
 
     /**
      * We need to do this because every implementation of {@link SessionFuture} today extends {@link
-     * SimpleForwardingListenableFuture}. The get() method in parent {@link Future} classes
-     * specifies checked exceptions in method signature.
+     * SimpleForwardingListenableFuture}. The get() method in parent {@link
+     * java.util.concurrent.Future} classes specifies checked exceptions in method signature.
      *
      * <p>This method is a workaround we don't have to handle checked exceptions specified by other
      * interfaces.
@@ -1172,7 +1192,7 @@ class SessionPool {
     default void addListener(Runnable listener, Executor exec) {}
   }
 
-  class PooledSessionFuture extends SimpleForwardingListenableFuture<CachedSession>
+  class PooledSessionFuture extends SimpleForwardingListenableFuture<PooledSession>
       implements SessionFuture {
 
     private volatile LeakedSessionException leakedException;
@@ -1181,7 +1201,7 @@ class SessionPool {
     private final ISpan span;
 
     @VisibleForTesting
-    PooledSessionFuture(ListenableFuture<CachedSession> delegate, ISpan span) {
+    PooledSessionFuture(ListenableFuture<PooledSession> delegate, ISpan span) {
       super(delegate);
       this.span = span;
     }
@@ -1243,8 +1263,8 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
-              return ps.getDelegate().singleUse();
+              PooledSession ps = session.get();
+              return ps.delegate.singleUse();
             },
             SessionPool.this,
             pooledSessionReplacementHandler,
@@ -1261,8 +1281,8 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
-              return ps.getDelegate().singleUse(bound);
+              PooledSession ps = session.get();
+              return ps.delegate.singleUse(bound);
             },
             SessionPool.this,
             pooledSessionReplacementHandler,
@@ -1278,8 +1298,8 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().singleUseReadOnlyTransaction();
+            PooledSession ps = session.get();
+            return ps.delegate.singleUseReadOnlyTransaction();
           },
           true);
     }
@@ -1288,8 +1308,8 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().singleUseReadOnlyTransaction(bound);
+            PooledSession ps = session.get();
+            return ps.delegate.singleUseReadOnlyTransaction(bound);
           },
           true);
     }
@@ -1298,8 +1318,8 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().readOnlyTransaction();
+            PooledSession ps = session.get();
+            return ps.delegate.readOnlyTransaction();
           },
           false);
     }
@@ -1308,8 +1328,8 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().readOnlyTransaction(bound);
+            PooledSession ps = session.get();
+            return ps.delegate.readOnlyTransaction(bound);
           },
           false);
     }
@@ -1384,7 +1404,7 @@ class SessionPool {
     @Override
     public ApiFuture<Empty> asyncClose() {
       try {
-        CachedSession delegate = getOrNull();
+        PooledSession delegate = getOrNull();
         if (delegate != null) {
           return delegate.asyncClose();
         }
@@ -1397,7 +1417,7 @@ class SessionPool {
       return ApiFutures.immediateFuture(Empty.getDefaultInstance());
     }
 
-    private CachedSession getOrNull() {
+    private PooledSession getOrNull() {
       try {
         return get();
       } catch (Throwable t) {
@@ -1406,13 +1426,13 @@ class SessionPool {
     }
 
     @Override
-    public CachedSession get() {
+    public PooledSession get() {
       return get(false);
     }
 
-    CachedSession get(final boolean eligibleForLongRunning) {
+    PooledSession get(final boolean eligibleForLongRunning) {
       if (inUse.compareAndSet(false, true)) {
-        CachedSession res = null;
+        PooledSession res = null;
         try {
           res = super.get();
         } catch (Throwable e) {
@@ -1425,7 +1445,7 @@ class SessionPool {
             incrementNumSessionsInUse();
             checkedOutSessions.add(this);
           }
-          ((PooledSession) res).eligibleForLongRunning = eligibleForLongRunning;
+          res.eligibleForLongRunning = eligibleForLongRunning;
         }
         initialized.countDown();
       }
@@ -1440,14 +1460,14 @@ class SessionPool {
     }
   }
 
-  class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<CachedSession>
+  class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<MultiplexedSession>
       implements SessionFuture {
 
     private volatile CountDownLatch initialized = new CountDownLatch(1);
     private final ISpan span;
 
     @VisibleForTesting
-    MultiplexedSessionFuture(ListenableFuture<CachedSession> delegate, ISpan span) {
+    MultiplexedSessionFuture(ListenableFuture<MultiplexedSession> delegate, ISpan span) {
       super(delegate);
       this.span = span;
     }
@@ -1498,8 +1518,8 @@ class SessionPool {
       try {
         return new AutoClosingReadContext<>(
             session -> {
-              CachedSession ps = session.get();
-              return ps.getDelegate().singleUse();
+              MultiplexedSession ms = session.get();
+              return ms.getDelegate().singleUse();
             },
             SessionPool.this,
             multiplexedSessionReplacementHandler,
@@ -1533,8 +1553,8 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().singleUseReadOnlyTransaction();
+            MultiplexedSession ms = session.get();
+            return ms.getDelegate().singleUseReadOnlyTransaction();
           },
           true);
     }
@@ -1543,8 +1563,8 @@ class SessionPool {
     public ReadOnlyTransaction singleUseReadOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().singleUseReadOnlyTransaction(bound);
+            MultiplexedSession ms = session.get();
+            return ms.getDelegate().singleUseReadOnlyTransaction(bound);
           },
           true);
     }
@@ -1553,8 +1573,8 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction() {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().readOnlyTransaction();
+            MultiplexedSession ms = session.get();
+            return ms.getDelegate().readOnlyTransaction();
           },
           false);
     }
@@ -1563,8 +1583,8 @@ class SessionPool {
     public ReadOnlyTransaction readOnlyTransaction(final TimestampBound bound) {
       return internalReadOnlyTransaction(
           session -> {
-            CachedSession ps = session.get();
-            return ps.getDelegate().readOnlyTransaction(bound);
+            MultiplexedSession ms = session.get();
+            return ms.getDelegate().readOnlyTransaction(bound);
           },
           false);
     }
@@ -1640,14 +1660,14 @@ class SessionPool {
 
     @Override
     public ApiFuture<Empty> asyncClose() {
-      CachedSession delegate = getOrNull();
+      MultiplexedSession delegate = getOrNull();
       if (delegate != null) {
         return delegate.asyncClose();
       }
       return ApiFutures.immediateFuture(Empty.getDefaultInstance());
     }
 
-    private CachedSession getOrNull() {
+    private MultiplexedSession getOrNull() {
       try {
         return get();
       } catch (Throwable t) {
@@ -1656,8 +1676,8 @@ class SessionPool {
     }
 
     @Override
-    public CachedSession get() {
-      CachedSession res = null;
+    public MultiplexedSession get() {
+      MultiplexedSession res = null;
       try {
         res = super.get();
       } catch (Throwable e) {
@@ -1700,9 +1720,6 @@ class SessionPool {
   }
 
   static final class MultiplexedSession implements CachedSession {
-
-    private static final AtomicInteger ACTIVE_RPC_COUNT = new AtomicInteger(0);
-
     SessionImpl delegate;
 
     MultiplexedSession(SessionImpl session) {
@@ -1842,17 +1859,13 @@ class SessionPool {
 
     @Override
     public void close() {
-      ACTIVE_RPC_COUNT.decrementAndGet();
+      // TODO arpanmishra@ what do we need to do with the close method.
     }
 
     @Override
     public ApiFuture<Empty> asyncClose() {
       close();
       return ApiFutures.immediateFuture(Empty.getDefaultInstance());
-    }
-
-    int getActiveRPCCount() {
-      return ACTIVE_RPC_COUNT.get();
     }
   }
 
@@ -2146,8 +2159,83 @@ class SessionPool {
     }
   }
 
-  private final class WaiterFuture extends ForwardingListenableFuture<CachedSession> {
+  private final class MultiplexedSessionWaiterFuture
+      extends ForwardingListenableFuture<MultiplexedSession> {
+    private static final long MAX_SESSION_WAIT_TIMEOUT = 240_000L;
+    private final SettableFuture<MultiplexedSession> waiter = SettableFuture.create();
 
+    @Override
+    protected ListenableFuture<? extends MultiplexedSession> delegate() {
+      return waiter;
+    }
+
+    private void put(MultiplexedSession session) {
+      waiter.set(session);
+    }
+
+    private void put(SpannerException e) {
+      waiter.setException(e);
+    }
+
+    @Override
+    public MultiplexedSession get() {
+      while (true) {
+        ISpan span = tracer.spanBuilder(WAIT_FOR_SESSION);
+        try (IScope waitScope = tracer.withSpan(span)) {
+          MultiplexedSession s = pollUninterruptedlyWithTimeout(options.getAcquireSessionTimeout());
+          if (s == null) {
+            // Set the status to DEADLINE_EXCEEDED and retry.
+            numWaiterTimeouts.incrementAndGet();
+            tracer.getCurrentSpan().setStatus(ErrorCode.DEADLINE_EXCEEDED);
+          } else {
+            return s;
+          }
+        } catch (Exception e) {
+          if (e instanceof SpannerException
+              && ErrorCode.RESOURCE_EXHAUSTED.equals(((SpannerException) e).getErrorCode())) {
+            numWaiterTimeouts.incrementAndGet();
+            tracer.getCurrentSpan().setStatus(ErrorCode.RESOURCE_EXHAUSTED);
+          }
+          span.setStatus(e);
+          throw e;
+        } finally {
+          span.end();
+        }
+      }
+    }
+
+    private MultiplexedSession pollUninterruptedlyWithTimeout(Duration acquireSessionTimeout) {
+      boolean interrupted = false;
+      try {
+        while (true) {
+          try {
+            return waiter.get(acquireSessionTimeout.toMillis(), TimeUnit.MILLISECONDS);
+          } catch (InterruptedException e) {
+            interrupted = true;
+          } catch (TimeoutException e) {
+            if (acquireSessionTimeout != null) {
+              throw SpannerExceptionFactory.newSpannerException(
+                  ErrorCode.RESOURCE_EXHAUSTED,
+                  "Timed out after waiting "
+                      + acquireSessionTimeout.toMillis()
+                      + "ms for acquiring multiplexed session. To mitigate error "
+                      + "SessionPoolOptions#setUseMultiplexedSession(false) to disable multiplexed session"
+                      + " or restart the client.");
+            }
+            return null;
+          } catch (ExecutionException e) {
+            throw SpannerExceptionFactory.newSpannerException(e.getCause());
+          }
+        }
+      } finally {
+        if (interrupted) {
+          Thread.currentThread().interrupt();
+        }
+      }
+    }
+  }
+
+  private final class WaiterFuture extends ForwardingListenableFuture<PooledSession> {
     private static final long MAX_SESSION_WAIT_TIMEOUT = 240_000L;
     private final SettableFuture<PooledSession> waiter = SettableFuture.create();
 
@@ -2500,6 +2588,7 @@ class SessionPool {
                       "Replacing Multiplexed Session => %s created "
                           + "before maintenance window => %s",
                       session.getName(), options.getMultiplexedSessionMaintenanceDuration()));
+              // TODO arpanmishra test if this is sufficiently retried
               createMultiplexedSessions();
             }
 
@@ -2508,15 +2597,10 @@ class SessionPool {
             // of the queue
             if (multiplexedSessions.size() > 1) {
               final MultiplexedSession lastSession = multiplexedSessions.peekLast();
-              final int rpcCount = lastSession.getActiveRPCCount();
-              if (lastSession.getActiveRPCCount() <= 0) {
-                logger.log(
-                    Level.INFO,
-                    String.format(
-                        "Removed Multiplexed Session => %s with " + "RPC count => %s ",
-                        lastSession.getName(), rpcCount));
-                multiplexedSessions.pollLast();
-              }
+              logger.log(
+                  Level.INFO,
+                  String.format("Removed Multiplexed Session => %s", lastSession.getName()));
+              multiplexedSessions.pollLast();
             }
           }
         }
@@ -2595,6 +2679,10 @@ class SessionPool {
 
   @GuardedBy("lock")
   private final Queue<WaiterFuture> waiters = new LinkedList<>();
+
+  @GuardedBy("lock")
+  private final Queue<MultiplexedSessionWaiterFuture> multiplexedSessionWaiters =
+      new LinkedList<>();
 
   @GuardedBy("lock")
   private int numSessionsBeingCreated = 0;
@@ -2883,9 +2971,9 @@ class SessionPool {
       poolMaintainer.init();
       if (options.getMinSessions() > 0) {
         createSessions(options.getMinSessions(), true);
-        if (options.getUseMultiplexedSession()) {
-          createMultiplexedSessions();
-        }
+      }
+      if (options.getUseMultiplexedSession()) {
+        createMultiplexedSessions();
       }
     }
   }
@@ -2954,21 +3042,19 @@ class SessionPool {
    */
   Session getMultiplexedSessionWithFallback() throws SpannerException {
     if (options.getUseMultiplexedSession()) {
-      try {
-        multiplexedSessionsInitialized.await();
-      } catch (InterruptedException interruptedException) {
-        throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
-      }
       ISpan span = tracer.getCurrentSpan();
       span.addAnnotation("Acquiring multiplexed session");
+      MultiplexedSessionWaiterFuture waiter = null;
       synchronized (lock) {
         MultiplexedSession session = multiplexedSessions.peek();
         if (session != null) {
           span.addAnnotation("Acquired multiplexed session");
-          MultiplexedSession.ACTIVE_RPC_COUNT.incrementAndGet();
           return createMultiplexedSessionFuture(Futures.immediateFuture(session), span);
+        } else {
+          span.addAnnotation("Multiplexed session available");
+          waiter = new MultiplexedSessionWaiterFuture();
+          multiplexedSessionWaiters.add(waiter);
         }
-        // TODO arpanmishra what if there is no session initially
       }
     }
     return getSession();
@@ -3023,7 +3109,7 @@ class SessionPool {
 
   private PooledSessionFuture checkoutSession(
       final ISpan span, final PooledSession readySession, WaiterFuture waiter) {
-    ListenableFuture<CachedSession> sessionFuture;
+    ListenableFuture<PooledSession> sessionFuture;
     if (waiter != null) {
       logger.log(
           Level.FINE,
@@ -3031,7 +3117,7 @@ class SessionPool {
       span.addAnnotation("Waiting for a session to come available");
       sessionFuture = waiter;
     } else {
-      SettableFuture<CachedSession> fut = SettableFuture.create();
+      SettableFuture<PooledSession> fut = SettableFuture.create();
       fut.set(readySession);
       sessionFuture = fut;
     }
@@ -3194,15 +3280,17 @@ class SessionPool {
   }
 
   private void handleMultiplexedSessionsFailure(SpannerException e) {
+    // TODO arpanmishra revisit this
     synchronized (lock) {
-      while (waiters.size() > 0) {
-        waiters.poll().put(e);
+      while (multiplexedSessionWaiters.size() > 0) {
+        multiplexedSessionWaiters.poll().put(e);
       }
       if (!dialect.isDone()) {
         dialect.setException(e);
       }
       if (isDatabaseOrInstanceNotFound(e)) {
         setResourceNotFoundException((ResourceNotFoundException) e);
+        // TODO arpanmishra is it safe to close the maintainer here
         poolMaintainer.close();
       }
     }
@@ -3395,6 +3483,9 @@ class SessionPool {
         multiplexedSessions.addFirst(multiplexedSession);
       }
       multiplexedSessionsInitialized.countDown();
+      if (!multiplexedSessionWaiters.isEmpty()) {
+        multiplexedSessionWaiters.poll().put(multiplexedSession);
+      }
     }
 
     @Override

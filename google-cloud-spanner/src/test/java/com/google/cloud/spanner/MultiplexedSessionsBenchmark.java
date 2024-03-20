@@ -92,12 +92,14 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
 
     @Setup(Level.Iteration)
     public void setup() throws Exception {
-      MetricExporter cloudMonitoringExporter = GoogleCloudMetricExporter.createWithDefaultConfiguration();
+      MetricExporter cloudMonitoringExporter =
+          GoogleCloudMetricExporter.createWithDefaultConfiguration();
       SdkMeterProvider sdkMeterProvider =
           SdkMeterProvider.builder()
               .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
               .build();
-      OpenTelemetry openTelemetry = OpenTelemetrySdk.builder().setMeterProvider(sdkMeterProvider).build();
+      OpenTelemetry openTelemetry =
+          OpenTelemetrySdk.builder().setMeterProvider(sdkMeterProvider).build();
       SpannerOptions.enableOpenTelemetryMetrics();
       SpannerOptions options =
           SpannerOptions.newBuilder()

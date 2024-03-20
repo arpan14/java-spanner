@@ -68,6 +68,7 @@ public class SessionPoolOptions {
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
 
+  private final Duration waitForMultiplexedSession;
   private final boolean useMultiplexedSession;
   private final Duration multiplexedSessionMaintenanceDuration;
 
@@ -96,6 +97,7 @@ public class SessionPoolOptions {
     this.poolMaintainerClock = builder.poolMaintainerClock;
     this.useMultiplexedSession = builder.useMultiplexedSession;
     this.multiplexedSessionMaintenanceDuration = builder.multiplexedSessionMaintenanceDuration;
+    this.waitForMultiplexedSession = builder.waitForMultiplexedSession;
   }
 
   @Override
@@ -128,8 +130,8 @@ public class SessionPoolOptions {
         && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock)
         && Objects.equals(this.useMultiplexedSession, other.useMultiplexedSession)
         && Objects.equals(
-            this.multiplexedSessionMaintenanceDuration,
-            other.multiplexedSessionMaintenanceDuration);
+            this.multiplexedSessionMaintenanceDuration, other.multiplexedSessionMaintenanceDuration)
+        && Objects.equals(this.waitForMultiplexedSession, other.waitForMultiplexedSession);
   }
 
   @Override
@@ -155,7 +157,8 @@ public class SessionPoolOptions {
         this.inactiveTransactionRemovalOptions,
         this.poolMaintainerClock,
         this.useMultiplexedSession,
-        this.multiplexedSessionMaintenanceDuration);
+        this.multiplexedSessionMaintenanceDuration,
+        this.waitForMultiplexedSession);
   }
 
   public Builder toBuilder() {
@@ -282,6 +285,10 @@ public class SessionPoolOptions {
   @VisibleForTesting
   Duration getMultiplexedSessionMaintenanceDuration() {
     return multiplexedSessionMaintenanceDuration;
+  }
+
+  Duration getWaitForMultiplexedSession() {
+    return waitForMultiplexedSession;
   }
 
   public static Builder newBuilder() {
@@ -474,6 +481,7 @@ public class SessionPoolOptions {
     private Position releaseToPosition = getReleaseToPositionFromSystemProperty();
     private boolean useMultiplexedSession = false;
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
+    private Duration waitForMultiplexedSession = Duration.ofSeconds(10);
 
     private Clock poolMaintainerClock;
 
