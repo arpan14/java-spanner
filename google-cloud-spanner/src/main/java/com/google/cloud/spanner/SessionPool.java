@@ -2182,7 +2182,6 @@ class SessionPool {
 
   private final class MultiplexedSessionWaiterFuture
       extends ForwardingListenableFuture<MultiplexedSession> {
-    private static final long MAX_SESSION_WAIT_TIMEOUT = 240_000L;
     private final SettableFuture<MultiplexedSession> waiter = SettableFuture.create();
 
     @Override
@@ -2622,19 +2621,20 @@ class SessionPool {
                       "Replacing Multiplexed Session => %s created "
                           + "before maintenance window => %s",
                       session.getName(), options.getMultiplexedSessionMaintenanceDuration()));
-              // TODO arpanmishra test if this is sufficiently retried
               createMultiplexedSessions();
             }
 
             // TODO arpanmishra@ this should take a lock?
             // TODO can we add a more efficient implementation of queue that only locks the front
             // of the queue
-            if (multiplexedSessions.size() > 1) {
-              final MultiplexedSession lastSession = multiplexedSessions.peekLast();
+            while (multiplexedSessions.size() > 1) {
+              final MultiplexedSession lastSession = multiplexedSessions.pollLast();
               logger.log(
                   Level.INFO,
                   String.format("Removed Multiplexed Session => %s", lastSession.getName()));
-              multiplexedSessions.pollLast();
+              if (multiplexedSessionRemovedListener != null) {
+                multiplexedSessionRemovedListener.apply(lastSession);
+              }
             }
           }
         }
@@ -2765,6 +2765,7 @@ class SessionPool {
   @VisibleForTesting Function<PooledSession, Void> idleSessionRemovedListener;
 
   @VisibleForTesting Function<PooledSession, Void> longRunningSessionRemovedListener;
+  @VisibleForTesting Function<MultiplexedSession, Void> multiplexedSessionRemovedListener;
 
   private final CountDownLatch waitOnMinSessionsLatch;
   private final SessionReplacementHandler pooledSessionReplacementHandler =
@@ -3079,7 +3080,7 @@ class SessionPool {
    * Returns a multiplexed session. We would always return the session which is at the front of the
    * queue since this will be the most recently created session.
    */
-  Session getMultiplexedSessionWithFallback() throws SpannerException {
+  SessionFuture getMultiplexedSessionWithFallback() throws SpannerException {
     if (options.getUseMultiplexedSession()) {
       ISpan span = tracer.getCurrentSpan();
       span.addAnnotation("Acquiring multiplexed session");
@@ -3358,18 +3359,11 @@ class SessionPool {
   }
 
   private void handleMultiplexedSessionsFailure(SpannerException e) {
-    // TODO arpanmishra revisit this
+    // other errors for dialect detection or database not found error is not handled here.
+    // we are relying on handleCreateSessionsFailure method for its handling
     synchronized (lock) {
-      while (multiplexedSessionWaiters.size() > 0) {
+      while (!multiplexedSessionWaiters.isEmpty()) {
         multiplexedSessionWaiters.poll().put(e);
-      }
-      if (!dialect.isDone()) {
-        dialect.setException(e);
-      }
-      if (isDatabaseOrInstanceNotFound(e)) {
-        setResourceNotFoundException((ResourceNotFoundException) e);
-        // TODO arpanmishra is it safe to close the maintainer here
-        poolMaintainer.close();
       }
     }
   }
@@ -3478,6 +3472,13 @@ class SessionPool {
   int totalSessions() {
     synchronized (lock) {
       return allSessions.size();
+    }
+  }
+
+  @VisibleForTesting
+  int totalMultiplexedSessions() {
+    synchronized (lock) {
+      return multiplexedSessions.size();
     }
   }
 

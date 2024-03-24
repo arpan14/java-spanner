@@ -18,6 +18,8 @@ package com.google.cloud.spanner;
 
 import static com.google.cloud.spanner.BenchmarkingUtilityScripts.collectResults;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
 import com.google.common.base.Stopwatch;
@@ -165,7 +167,8 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
     try (ResultSet rs = server.client.singleUse().executeQuery(getRandomisedReadStatement())) {
       while (rs.next()) {
-        int count = rs.getColumnCount();
+        assertEquals(1, rs.getColumnCount());
+        assertNotNull(rs.getValue(0));
       }
     }
     return watch.elapsed();
