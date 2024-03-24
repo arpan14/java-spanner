@@ -226,7 +226,7 @@ class SessionClient implements AutoCloseable {
   }
 
   /** Create a multiplexed session. These sessions are not affiliated with any GRPC channel. */
-  SessionImpl createMultiplexedSession(SessionConsumer consumer) {
+  void createMultiplexedSession(SessionConsumer consumer) {
     ISpan span = spanner.getTracer().spanBuilder(SpannerImpl.CREATE_MULTIPLEXED_SESSION);
     try (IScope s = spanner.getTracer().withSpan(span)) {
       com.google.spanner.v1.Session session =
@@ -242,11 +242,9 @@ class SessionClient implements AutoCloseable {
           new SessionImpl(
               spanner, session.getName(), session.getCreateTime(), session.getMultiplexed(), null);
       consumer.onSessionReady(sessionImpl);
-      return sessionImpl;
     } catch (RuntimeException e) {
       span.setStatus(e);
       consumer.onSessionCreateFailure(e, 1);
-      throw e;
     } finally {
       span.end();
     }
