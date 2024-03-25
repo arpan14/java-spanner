@@ -31,6 +31,9 @@ import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
 import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -94,6 +97,11 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
     @Setup(Level.Iteration)
     public void setup() throws Exception {
+      // setup open telemetry metrics and traces
+      SdkTracerProvider tracerProvider =
+          SdkTracerProvider.builder()
+              .addSpanProcessor(SimpleSpanProcessor.create(InMemorySpanExporter.create()))
+              .build();
       MetricExporter cloudMonitoringExporter =
           GoogleCloudMetricExporter.createWithDefaultConfiguration();
       SdkMeterProvider sdkMeterProvider =
@@ -101,8 +109,10 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
               .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
               .build();
       OpenTelemetry openTelemetry =
-          OpenTelemetrySdk.builder().setMeterProvider(sdkMeterProvider).build();
+          OpenTelemetrySdk.builder().setMeterProvider(sdkMeterProvider)
+              .setTracerProvider(tracerProvider).build();
       SpannerOptions.enableOpenTelemetryMetrics();
+      SpannerOptions.enableOpenTelemetryTraces();
       SpannerOptions options =
           SpannerOptions.newBuilder()
               .setOpenTelemetry(openTelemetry)
