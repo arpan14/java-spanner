@@ -16,6 +16,8 @@
 package com.google.cloud.spanner.it;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 import com.google.cloud.spanner.Database;
 import com.google.cloud.spanner.DatabaseAdminClient;
@@ -24,17 +26,22 @@ import com.google.cloud.spanner.IntegrationTestEnv;
 import com.google.cloud.spanner.Key;
 import com.google.cloud.spanner.Mutation;
 import com.google.cloud.spanner.ParallelIntegrationTest;
+import com.google.cloud.spanner.ResultSet;
 import com.google.cloud.spanner.SessionPoolOptions;
 import com.google.cloud.spanner.Spanner;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Struct;
 import com.google.cloud.spanner.TimestampBound;
 import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListeningScheduledExecutorService;
+import com.google.common.util.concurrent.MoreExecutors;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.AfterClass;
@@ -117,15 +124,28 @@ public class ITMultiplexedSessionsTest {
   }
 
   @Test
-  public void pointRead() {
+  public void pointRead() throws Exception {
+    ListeningScheduledExecutorService service =
+        MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(10));
+    List<ListenableFuture<Struct>> listenableFutures = new ArrayList();
+    for (int i = 0; i < 10; i++) {
+      listenableFutures.add(service.submit(() -> runBenchmarksForQueries()));
+    }
+    for(ListenableFuture<Struct> listenableFuture:listenableFutures) {
+      Struct row = listenableFuture.get();
+      assertThat(row).isNotNull();
+      assertThat(row.getString(0)).isEqualTo("k1");
+      assertThat(row.getString(1)).isEqualTo("v1");
+      // Ensure that the Struct implementation supports equality properly.
+      assertThat(row)
+          .isEqualTo(Struct.newBuilder().set("key").to("k1").set("stringvalue").to("v1").build());
+    }
+  }
+
+  private Struct runBenchmarksForQueries() {
     Struct row =
         client.singleUse(TimestampBound.strong()).readRow(TABLE_NAME, Key.of("k1"), ALL_COLUMNS);
-    assertThat(row).isNotNull();
-    assertThat(row.getString(0)).isEqualTo("k1");
-    assertThat(row.getString(1)).isEqualTo("v1");
-    // Ensure that the Struct implementation supports equality properly.
-    assertThat(row)
-        .isEqualTo(Struct.newBuilder().set("key").to("k1").set("stringvalue").to("v1").build());
+    return row;
   }
 
   public static String getUniqueDatabaseId() {
