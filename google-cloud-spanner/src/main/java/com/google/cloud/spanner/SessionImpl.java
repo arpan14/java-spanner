@@ -476,10 +476,6 @@ class SessionImpl implements Session {
     return ctx;
   }
 
-  boolean hasReadyTransaction() {
-    return readyTransactionId != null;
-  }
-
   TraceWrapper getTracer() {
     return tracer;
   }

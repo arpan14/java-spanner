@@ -1684,9 +1684,7 @@ class SessionPool {
         // ignore the exception as it will be handled by the call to super.get() below.
       }
       if (res != null) {
-        // TODO arpanmishra@ why do we really need to add this span?
         res.markBusy(span);
-        span.addAnnotation("Using multiplexed Session", "sessionId", res.getName());
       }
       initialized.countDown();
 
@@ -3049,10 +3047,11 @@ class SessionPool {
       synchronized (lock) {
         MultiplexedSession session = multiplexedSessions.peek();
         if (session != null) {
-          span.addAnnotation("Acquired multiplexed session");
+          span.addAnnotation("Acquired multiplexed session", "sessionId",
+              session.getName());
           return createMultiplexedSessionFuture(Futures.immediateFuture(session), span);
         } else {
-          span.addAnnotation("Multiplexed session available");
+          span.addAnnotation("Multiplexed session un-available. Adding to waiter queue.");
           waiter = new MultiplexedSessionWaiterFuture();
           multiplexedSessionWaiters.add(waiter);
         }
