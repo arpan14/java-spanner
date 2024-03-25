@@ -57,12 +57,9 @@ import org.threeten.bp.Instant;
  * users need not be aware of the actual session management, pooling and handling.
  */
 class SessionImpl implements Session {
-
   private final TraceWrapper tracer;
 
-  /**
-   * Keep track of running transactions on this session per thread.
-   */
+  /** Keep track of running transactions on this session per thread. */
   static final ThreadLocal<Boolean> hasPendingTransaction = ThreadLocal.withInitial(() -> false);
 
   static void throwIfTransactionsPending() {
@@ -87,14 +84,10 @@ class SessionImpl implements Session {
    */
   interface SessionTransaction {
 
-    /**
-     * Invalidates the transaction, generally because a new one has been started on the session.
-     */
+    /** Invalidates the transaction, generally because a new one has been started on the session. */
     void invalidate();
 
-    /**
-     * Registers the current span on the transaction.
-     */
+    /** Registers the current span on the transaction. */
     void setSpan(ISpan span);
   }
 
@@ -105,8 +98,7 @@ class SessionImpl implements Session {
   ByteString readyTransactionId;
   private final Map<SpannerRpc.Option, ?> options;
   private volatile Instant lastUseTime;
-  @Nullable
-  private final Instant createTime;
+  @Nullable private final Instant createTime;
   private final boolean isMultiplexed;
   private ISpan currentSpan;
 
@@ -485,6 +477,10 @@ class SessionImpl implements Session {
       }
     }
     return ctx;
+  }
+
+  boolean hasReadyTransaction() {
+    return readyTransactionId != null;
   }
 
   TraceWrapper getTracer() {
