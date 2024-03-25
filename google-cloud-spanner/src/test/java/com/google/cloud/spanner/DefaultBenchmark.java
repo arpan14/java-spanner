@@ -37,6 +37,7 @@ import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -108,6 +109,7 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
               .addSpanProcessor(BatchSpanProcessor.builder(traceExporter).build())
               .setResource(Resource.create(
                   Attributes.of(ResourceAttributes.SERVICE_NAME, "Java-Default-Benchmark")))
+              .setSampler(Sampler.alwaysOn())
               .build();
       MetricExporter cloudMonitoringExporter =
           GoogleCloudMetricExporter.createWithDefaultConfiguration();
