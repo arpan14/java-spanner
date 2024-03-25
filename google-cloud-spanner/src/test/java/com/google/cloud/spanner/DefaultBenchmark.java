@@ -22,6 +22,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
 import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
+import com.google.cloud.opentelemetry.trace.TraceExporter;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
@@ -31,9 +32,9 @@ import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
 import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
+import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -98,9 +99,10 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
     @Setup(Level.Iteration)
     public void setup() throws Exception {
       // setup open telemetry metrics and traces
+      SpanExporter traceExporter = TraceExporter.createWithDefaultConfiguration();
       SdkTracerProvider tracerProvider =
           SdkTracerProvider.builder()
-              .addSpanProcessor(SimpleSpanProcessor.create(InMemorySpanExporter.create()))
+              .addSpanProcessor(BatchSpanProcessor.builder(traceExporter).build())
               .build();
       MetricExporter cloudMonitoringExporter =
           GoogleCloudMetricExporter.createWithDefaultConfiguration();
