@@ -277,4 +277,3 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
         delegate, AsyncTransactionManagerImpl::getCommitResponse, MoreExecutors.directExecutor());
   }
 }
->>>>>>> 0cc6240e9 (chore: add addListener() default method in SessionFuture interface.)

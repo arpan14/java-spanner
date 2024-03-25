@@ -50,6 +50,7 @@ import com.google.api.core.SettableApiFuture;
 import com.google.api.gax.core.ExecutorProvider;
 import com.google.api.gax.rpc.ServerStream;
 import com.google.cloud.Timestamp;
+import com.google.cloud.Tuple;
 import com.google.cloud.grpc.GrpcTransportOptions;
 import com.google.cloud.grpc.GrpcTransportOptions.ExecutorFactory;
 import com.google.cloud.spanner.Options.QueryOption;
@@ -585,25 +586,6 @@ class SessionPool {
         SessionNotFoundException e, MultiplexedSessionFuture session) {
       // TODO arpanmishra add this handling
       return null;
-    }
-  }
-
-  class PooledSessionReplacementHandler implements SessionReplacementHandler<PooledSessionFuture> {
-    @Override
-    public PooledSessionFuture replaceSession(
-        SessionNotFoundException e, PooledSessionFuture session) {
-      if (!options.isFailIfSessionNotFound() && session.get().isAllowReplacing()) {
-        synchronized (lock) {
-          numSessionsInUse--;
-          numSessionsReleased++;
-          checkedOutSessions.remove(session);
-        }
-        session.leakedException = null;
-        invalidateSession((PooledSession) session.get());
-        return getSession();
-      } else {
-        throw e;
-      }
     }
   }
 

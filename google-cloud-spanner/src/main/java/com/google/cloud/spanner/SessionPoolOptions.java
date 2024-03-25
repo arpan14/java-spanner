@@ -73,8 +73,6 @@ public class SessionPoolOptions {
   private final boolean useMultiplexedSession;
   private final Duration multiplexedSessionMaintenanceDuration;
 
-  private final Duration waitForMultiplexedSession;
-
   private SessionPoolOptions(Builder builder) {
     // minSessions > maxSessions is only possible if the user has only set a value for maxSessions.
     // We allow that to prevent code that only sets a value for maxSessions to break if the
@@ -494,10 +492,10 @@ public class SessionPoolOptions {
      * which means that the option is disabled.
      */
     private long randomizePositionQPSThreshold = 0L;
+
     private boolean useMultiplexedSession = false;
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
     private Duration waitForMultiplexedSession = Duration.ofSeconds(10);
-
     private Clock poolMaintainerClock;
 
     private static Position getReleaseToPositionFromSystemProperty() {
@@ -711,7 +709,7 @@ public class SessionPoolOptions {
      * SessionPoolOptions#maxSessions} based on the traffic load. Failing to do so will result in
      * higher latencies.
      */
-    Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
+    public Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
       this.useMultiplexedSession = useMultiplexedSession;
       return this;
     }
