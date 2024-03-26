@@ -1460,8 +1460,6 @@ class SessionPool {
 
   class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<MultiplexedSession>
       implements SessionFuture {
-
-    private volatile CountDownLatch initialized = new CountDownLatch(1);
     private final ISpan span;
 
     @VisibleForTesting
@@ -1684,11 +1682,11 @@ class SessionPool {
       if (res != null) {
         res.markBusy(span);
       }
-      initialized.countDown();
-
       try {
-        // TODO arpanmishra@ do we really need this latch?
-        initialized.await();
+        /**
+         * this will always be non-blocking because {@link MultiplexedSessionFuture} is wrapped
+         * on an already instantiated instance of {@link MultiplexedSession}.
+         */
         return super.get();
       } catch (ExecutionException e) {
         throw SpannerExceptionFactory.newSpannerException(e.getCause());
