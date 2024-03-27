@@ -123,6 +123,8 @@ class SessionPool {
   private static final Logger logger = Logger.getLogger(SessionPool.class.getName());
   private final TraceWrapper tracer;
   static final String WAIT_FOR_SESSION = "SessionPool.WaitForSession";
+  static final String WAIT_FOR_MULTIPLEXED_SESSION = "SessionPool.WaitForMultiplexedSession";
+
 
   /**
    * If the {@link SessionPoolOptions#getWaitForMinSessions()} duration is greater than zero, waits
@@ -2181,7 +2183,7 @@ class SessionPool {
     @Override
     public MultiplexedSession get() {
       while (true) {
-        ISpan span = tracer.spanBuilder(WAIT_FOR_SESSION);
+        ISpan span = tracer.spanBuilder(WAIT_FOR_MULTIPLEXED_SESSION);
         try (IScope waitScope = tracer.withSpan(span)) {
           MultiplexedSession s = pollUninterruptedlyWithTimeout(options.getAcquireSessionTimeout());
           if (s == null) {
@@ -2205,6 +2207,13 @@ class SessionPool {
       }
     }
 
+    /**
+     * Method which allows to obtain a multiplexed session after blocking for a configurable duration
+     * {@link SessionPoolOptions#getAcquireSessionTimeout()}. Note that this duration becomes
+     * obsolete in case we have set {@link SessionPoolOptions#getWaitForMultiplexedSession()}. Because
+     * {@link SessionPoolOptions#getWaitForMultiplexedSession()} will ensure that the multiplexed
+     * session is initialized and available during application start up.
+     */
     private MultiplexedSession pollUninterruptedlyWithTimeout(Duration acquireSessionTimeout) {
       boolean interrupted = false;
       try {
@@ -2217,11 +2226,8 @@ class SessionPool {
             if (acquireSessionTimeout != null) {
               throw SpannerExceptionFactory.newSpannerException(
                   ErrorCode.RESOURCE_EXHAUSTED,
-                  "Timed out after waiting "
-                      + acquireSessionTimeout.toMillis()
-                      + "ms for acquiring multiplexed session. To mitigate error "
-                      + "SessionPoolOptions#setUseMultiplexedSession(false) to disable multiplexed session"
-                      + " or restart the client.");
+                  String.format("Timed out after waiting %s ms to acquire multiplexed session.",
+                      acquireSessionTimeout.toMillis()));
             }
             return null;
           } catch (ExecutionException e) {
@@ -3350,16 +3356,6 @@ class SessionPool {
     return false;
   }
 
-  private void handleMultiplexedSessionsFailure(SpannerException e) {
-    // other errors for dialect detection or database not found error is not handled here.
-    // we are relying on handleCreateSessionsFailure method for its handling
-    synchronized (lock) {
-      while (!multiplexedSessionWaiters.isEmpty()) {
-        multiplexedSessionWaiters.poll().put(e);
-      }
-    }
-  }
-
   private void handleCreateSessionsFailure(SpannerException e, int count) {
     synchronized (lock) {
       for (int i = 0; i < count; i++) {
@@ -3519,6 +3515,16 @@ class SessionPool {
         sessionClient.createMultiplexedSession(multiplexedSessionConsumer);
       } catch (Throwable t) {
         handleMultiplexedSessionsFailure(newSpannerException(t));
+      }
+    }
+  }
+
+  private void handleMultiplexedSessionsFailure(SpannerException e) {
+    // other errors for dialect detection or database not found error is not handled here.
+    // we are relying on handleCreateSessionsFailure method for its handling
+    synchronized (lock) {
+      while (!multiplexedSessionWaiters.isEmpty()) {
+        multiplexedSessionWaiters.poll().put(e);
       }
     }
   }
