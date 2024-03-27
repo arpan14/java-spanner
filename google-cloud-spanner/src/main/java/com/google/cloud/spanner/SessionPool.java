@@ -2601,13 +2601,13 @@ class SessionPool {
                 Duration.between(session.getDelegate().getCreateTime(), currentTime);
             if (durationFromCreationTime.compareTo(
                     options.getMultiplexedSessionMaintenanceDuration())
-                > 0) {
+                > 0 && numMultiplexedSessionsBeingCreated == 0) {
               logger.log(
                   Level.INFO,
                   String.format(
-                      "Replacing Multiplexed Session => %s created "
-                          + "before maintenance window => %s",
-                      session.getName(), options.getMultiplexedSessionMaintenanceDuration()));
+                      "Replacing Multiplexed Session => %s since it's created before maintenance "
+                          + "window => %s days", session.getName(),
+                      options.getMultiplexedSessionMaintenanceDuration().toDays()));
               createMultiplexedSessions();
             }
 
@@ -2708,6 +2708,9 @@ class SessionPool {
 
   @GuardedBy("lock")
   private int numSessionsBeingCreated = 0;
+
+  @GuardedBy("lock")
+  private int numMultiplexedSessionsBeingCreated = 0;
 
   @GuardedBy("lock")
   private int numSessionsInUse = 0;
@@ -3512,8 +3515,10 @@ class SessionPool {
     logger.log(Level.FINE, String.format("Creating multiplexed sessions"));
     synchronized (lock) {
       try {
+        numMultiplexedSessionsBeingCreated++;
         sessionClient.createMultiplexedSession(multiplexedSessionConsumer);
       } catch (Throwable t) {
+        numMultiplexedSessionsBeingCreated--;
         handleMultiplexedSessionsFailure(newSpannerException(t));
       }
     }
@@ -3558,16 +3563,17 @@ class SessionPool {
       final MultiplexedSession multiplexedSession = new MultiplexedSession(session);
       synchronized (lock) {
         multiplexedSessions.addFirst(multiplexedSession);
-      }
-      multiplexedSessionsInitialized.countDown();
-      if (!multiplexedSessionWaiters.isEmpty()) {
-        multiplexedSessionWaiters.poll().put(multiplexedSession);
+        multiplexedSessionsInitialized.countDown();
+        numMultiplexedSessionsBeingCreated--;
+        while (!multiplexedSessionWaiters.isEmpty()) {
+          multiplexedSessionWaiters.poll().put(multiplexedSession);
+        }
       }
     }
 
     @Override
     public void onSessionCreateFailure(Throwable t, int createFailureForSessionCount) {
-      // TODO arpanmishra@ : add failure conditions
+      handleMultiplexedSessionsFailure(newSpannerException(t));
     }
   }
 
