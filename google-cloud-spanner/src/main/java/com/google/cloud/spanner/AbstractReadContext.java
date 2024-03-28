@@ -725,6 +725,7 @@ abstract class AbstractReadContext
             if (selector != null) {
               request.setTransaction(selector);
             }
+            span.addAnnotation("Starting Query");
             SpannerRpc.StreamingCall call =
                 rpc.executeQuery(
                     request.build(), stream.consumer(), session.getOptions(), isRouteToLeader());
@@ -870,6 +871,7 @@ abstract class AbstractReadContext
               builder.setTransaction(selector);
             }
             builder.setRequestOptions(buildRequestOptions(readOptions));
+            span.addAnnotation("Starting Read");
             SpannerRpc.StreamingCall call =
                 rpc.read(
                     builder.build(), stream.consumer(), session.getOptions(), isRouteToLeader());

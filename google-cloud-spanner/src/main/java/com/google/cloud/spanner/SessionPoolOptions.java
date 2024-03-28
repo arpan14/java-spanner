@@ -117,9 +117,9 @@ public class SessionPoolOptions {
         && Objects.equals(this.actionOnSessionNotFound, other.actionOnSessionNotFound)
         && Objects.equals(this.actionOnSessionLeak, other.actionOnSessionLeak)
         && Objects.equals(
-            this.trackStackTraceOfSessionCheckout, other.trackStackTraceOfSessionCheckout)
+        this.trackStackTraceOfSessionCheckout, other.trackStackTraceOfSessionCheckout)
         && Objects.equals(
-            this.initialWaitForSessionTimeoutMillis, other.initialWaitForSessionTimeoutMillis)
+        this.initialWaitForSessionTimeoutMillis, other.initialWaitForSessionTimeoutMillis)
         && Objects.equals(this.loopFrequency, other.loopFrequency)
         && Objects.equals(this.keepAliveIntervalMinutes, other.keepAliveIntervalMinutes)
         && Objects.equals(this.removeInactiveSessionAfter, other.removeInactiveSessionAfter)
@@ -129,7 +129,7 @@ public class SessionPoolOptions {
         && Objects.equals(this.releaseToPosition, other.releaseToPosition)
         && Objects.equals(this.randomizePositionQPSThreshold, other.randomizePositionQPSThreshold)
         && Objects.equals(
-            this.inactiveTransactionRemovalOptions, other.inactiveTransactionRemovalOptions)
+        this.inactiveTransactionRemovalOptions, other.inactiveTransactionRemovalOptions)
         && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock)
         && Objects.equals(this.useMultiplexedSession, other.useMultiplexedSession)
         && Objects.equals(
