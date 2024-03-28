@@ -489,9 +489,7 @@ public class SessionPoolOptions {
      * which means that the option is disabled.
      */
     private long randomizePositionQPSThreshold = 0L;
-
     private boolean useMultiplexedSession = getUseMultiplexedSessionFromEnvVariable();
-
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
     private Clock poolMaintainerClock;
 
@@ -718,7 +716,7 @@ public class SessionPoolOptions {
      * SessionPoolOptions#maxSessions} based on the traffic load. Failing to do so will result in
      * higher latencies.
      */
-    Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
+    public Builder setUseMultiplexedSession(boolean useMultiplexedSession) {
       this.useMultiplexedSession = useMultiplexedSession;
       return this;
     }

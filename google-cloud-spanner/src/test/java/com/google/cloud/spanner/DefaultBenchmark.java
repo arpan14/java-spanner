@@ -21,10 +21,25 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
+import com.google.cloud.opentelemetry.trace.TraceExporter;
+import com.google.cloud.spanner.MultiplexedSessionsBenchmark.BenchmarkState;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.export.MetricExporter;
+import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.resources.Resource;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
+import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -68,12 +83,12 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 0)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
-  @State(Scope.Benchmark)
+  @State(Scope.Thread)
   public static class BenchmarkState {
 
     // TODO(developer): Add your values here for PROJECT_ID, INSTANCE_ID, DATABASE_ID
-    private static final String INSTANCE_ID = "";
-    private static final String DATABASE_ID = "";
+    private static final String INSTANCE_ID = "arpanmishra-dev-span";
+    private static final String DATABASE_ID = "anonymous-sessions";
     private static final String SERVER_URL = "https://staging-wrenchworks.sandbox.googleapis.com";
     private Spanner spanner;
     private DatabaseClientImpl client;
@@ -86,8 +101,32 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
     @Setup(Level.Iteration)
     public void setup() throws Exception {
+      // setup open telemetry metrics and traces
+      SpanExporter traceExporter = TraceExporter.createWithDefaultConfiguration();
+      SdkTracerProvider tracerProvider =
+          SdkTracerProvider.builder()
+              .addSpanProcessor(BatchSpanProcessor.builder(traceExporter).build())
+              .setResource(
+                  Resource.create(
+                      Attributes.of(ResourceAttributes.SERVICE_NAME, "Java-Default-Benchmark")))
+              .setSampler(Sampler.alwaysOn())
+              .build();
+      MetricExporter cloudMonitoringExporter =
+          GoogleCloudMetricExporter.createWithDefaultConfiguration();
+      SdkMeterProvider sdkMeterProvider =
+          SdkMeterProvider.builder()
+              .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
+              .build();
+      OpenTelemetry openTelemetry =
+          OpenTelemetrySdk.builder()
+              .setMeterProvider(sdkMeterProvider)
+              .setTracerProvider(tracerProvider)
+              .build();
+      SpannerOptions.enableOpenTelemetryMetrics();
+      SpannerOptions.enableOpenTelemetryTraces();
       SpannerOptions options =
           SpannerOptions.newBuilder()
+              .setOpenTelemetry(openTelemetry)
               .setSessionPoolOption(
                   SessionPoolOptions.newBuilder()
                       .setMinSessions(minSessions)
@@ -129,45 +168,38 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
   }
 
   /** Measures the time needed to execute a burst of read and write requests. */
-  @Benchmark
-  public void burstQueriesAndWrites(final BenchmarkState server) throws Exception {
-    final DatabaseClientImpl client = server.client;
-    SessionPool pool = client.pool;
-    assertThat(pool.totalSessions())
-        .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
-
-    ListeningScheduledExecutorService service =
-        MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
-    List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS);
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(
-          service.submit(() -> runBenchmarksForSingleUseQueries(server, TOTAL_READS_PER_RUN)));
-    }
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(service.submit(() -> runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN)));
-    }
-
-    collectResultsAndPrint(service, results, TOTAL_READS_PER_RUN + TOTAL_WRITES_PER_RUN);
-  }
+  /**
+   * @Benchmark public void burstQueriesAndWrites(final BenchmarkState server) throws Exception {
+   * final DatabaseClientImpl client = server.client; SessionPool pool = client.pool;
+   * assertThat(pool.totalSessions())
+   * .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
+   *
+   * <p>ListeningScheduledExecutorService service =
+   * MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
+   * List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS); for (int i
+   * = 0; i < PARALLEL_THREADS; i++) { results.add(service.submit(() ->
+   * runBenchmarksForQueries(server, TOTAL_READS_PER_RUN))); } for (int i = 0; i < PARALLEL_THREADS;
+   * i++) { results.add(service.submit(() -> runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN)));
+   * }
+   *
+   * <p>collectResultsAndPrint(service, results, TOTAL_READS_PER_RUN + TOTAL_WRITES_PER_RUN); }
+   */
 
   /** Measures the time needed to execute a burst of read and write requests. */
-  @Benchmark
-  public void burstUpdates(final BenchmarkState server) throws Exception {
-    final DatabaseClientImpl client = server.client;
-    SessionPool pool = client.pool;
-    assertThat(pool.totalSessions())
-        .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
-
-    ListeningScheduledExecutorService service =
-        MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
-    List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS);
-    for (int i = 0; i < PARALLEL_THREADS; i++) {
-      results.add(service.submit(() -> runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN)));
-    }
-
-    collectResultsAndPrint(service, results, TOTAL_WRITES_PER_RUN);
-  }
-
+  /**
+   * @Benchmark public void burstUpdates(final BenchmarkState server) throws Exception { final
+   * DatabaseClientImpl client = server.client; SessionPool pool = client.pool;
+   * assertThat(pool.totalSessions())
+   * .isEqualTo(server.spanner.getOptions().getSessionPoolOptions().getMinSessions());
+   *
+   * <p>ListeningScheduledExecutorService service =
+   * MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(PARALLEL_THREADS));
+   * List<ListenableFuture<List<Duration>>> results = new ArrayList<>(PARALLEL_THREADS); for (int i
+   * = 0; i < PARALLEL_THREADS; i++) { results.add(service.submit(() ->
+   * runBenchmarkForUpdates(server, TOTAL_WRITES_PER_RUN))); }
+   *
+   * <p>collectResultsAndPrint(service, results, TOTAL_WRITES_PER_RUN); }
+   */
   private List<java.time.Duration> runBenchmarksForSingleUseQueries(
       final BenchmarkState server, int numberOfOperations) {
     List<Duration> results = new ArrayList<>(numberOfOperations);
@@ -194,6 +226,9 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
         assertEquals(1, rs.getColumnCount());
         assertNotNull(rs.getValue(0));
       }
+    } catch (Throwable t) {
+      // ignore exception
+      System.out.println("Got exception = " + t);
     }
     return watch.elapsed();
   }

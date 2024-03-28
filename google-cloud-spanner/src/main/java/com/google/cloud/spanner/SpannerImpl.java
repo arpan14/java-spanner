@@ -23,7 +23,6 @@ import com.google.cloud.BaseService;
 import com.google.cloud.PageImpl;
 import com.google.cloud.PageImpl.NextPageFetcher;
 import com.google.cloud.grpc.GrpcTransportOptions;
-import com.google.cloud.spanner.SessionClient.SessionId;
 import com.google.cloud.spanner.SpannerOptions.CloseableExecutorProvider;
 import com.google.cloud.spanner.admin.database.v1.stub.DatabaseAdminStubSettings;
 import com.google.cloud.spanner.admin.instance.v1.stub.InstanceAdminStubSettings;
@@ -33,7 +32,6 @@ import com.google.cloud.spanner.spi.v1.SpannerRpc.Paginated;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
@@ -173,12 +171,6 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
    */
   public ExecutorProvider getAsyncExecutorProvider() {
     return asyncExecutorProvider;
-  }
-
-  SessionImpl sessionWithId(String name) {
-    Preconditions.checkArgument(!Strings.isNullOrEmpty(name), "name is null or empty");
-    SessionId id = SessionId.of(name);
-    return getSessionClient(id.getDatabaseId()).sessionWithId(name);
   }
 
   void checkClosed() {

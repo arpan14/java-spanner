@@ -98,6 +98,11 @@ public class AbstractReadContextTest {
     TransactionSelector getTransactionSelector() {
       return TransactionSelector.getDefaultInstance();
     }
+
+    @Override
+    long getTransactionChannelHint() {
+      return 0;
+    }
   }
 
   private final class TestReadContextWithTag extends AbstractReadContext {
@@ -108,6 +113,11 @@ public class AbstractReadContextTest {
     @Override
     TransactionSelector getTransactionSelector() {
       return TransactionSelector.getDefaultInstance();
+    }
+
+    @Override
+    long getTransactionChannelHint() {
+      return 0;
     }
 
     String getTransactionTag() {
