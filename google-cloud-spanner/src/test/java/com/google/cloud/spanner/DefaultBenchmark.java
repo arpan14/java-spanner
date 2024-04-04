@@ -127,6 +127,7 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
       SpannerOptions.enableOpenTelemetryTraces();
       SpannerOptions options =
           SpannerOptions.newBuilder()
+              .enableGrpcGcpExtension()
               .setOpenTelemetry(openTelemetry)
               .setSessionPoolOption(
                   SessionPoolOptions.newBuilder()
