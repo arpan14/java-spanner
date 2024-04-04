@@ -159,7 +159,9 @@ public class ITMultiplexedSessionsTest {
 
   private void executeRead() {
     ResultSet resultSet =
-        client.singleUse(TimestampBound.strong()).read(TABLE_NAME, KeySet.singleKey(Key.of("k1")), ALL_COLUMNS);
+        client
+            .singleUse(TimestampBound.strong())
+            .read(TABLE_NAME, KeySet.singleKey(Key.of("k1")), ALL_COLUMNS);
     while (resultSet.next()) {
       assertThat(resultSet).isNotNull();
       assertThat(resultSet.getString(0)).isEqualTo("k1");

@@ -100,7 +100,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     // Run one maintenance loop.
     SessionFuture session1 = pool.getMultiplexedSessionWithFallback();
     runMaintenanceLoop(clock, pool, 1);
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertTrue(multiplexedSessionsRemoved.isEmpty());
 
     // Advance clock by 4 days
@@ -108,7 +107,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     // Run one maintenance loop. the first session would not be stale yet since it has now existed
     // for less than 7 days.
     runMaintenanceLoop(clock, pool, 1);
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertTrue(multiplexedSessionsRemoved.isEmpty());
 
     // Advance clock by 5 days
@@ -121,7 +119,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
 
     SessionFuture session2 = pool.getMultiplexedSessionWithFallback();
     assertNotEquals(session1.getName(), session2.getName());
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertEquals(1, multiplexedSessionsRemoved.size());
     assertTrue(multiplexedSessionsRemoved.contains(session1.get()));
 
@@ -135,7 +132,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
 
     SessionFuture session3 = pool.getMultiplexedSessionWithFallback();
     assertNotEquals(session2.getName(), session3.getName());
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertEquals(2, multiplexedSessionsRemoved.size());
     assertTrue(multiplexedSessionsRemoved.contains(session2.get()));
   }
@@ -170,7 +166,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     // Run one maintenance loop. the first session would now be stale, but since new session
     // creation failed, then the stale session won't be removed.
     runMaintenanceLoop(clock, pool, 1);
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertTrue(multiplexedSessionsRemoved.isEmpty());
 
     doAnswer(
@@ -197,7 +192,6 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     SessionFuture session2 = pool.getMultiplexedSessionWithFallback();
 
     assertNotEquals(session1.getName(), session2.getName());
-    assertEquals(1, pool.totalMultiplexedSessions());
     assertEquals(1, multiplexedSessionsRemoved.size());
     assertTrue(multiplexedSessionsRemoved.contains(session1.get()));
   }
