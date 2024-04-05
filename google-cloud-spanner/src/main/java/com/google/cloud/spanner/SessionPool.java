@@ -3447,8 +3447,9 @@ class SessionPool {
     @Override
     public void onSessionReady(SessionImpl sessionImpl) {
       final SettableFuture settableFuture = SettableFuture.create();
-      final MultiplexedSession multiplexedSession = new MultiplexedSession(sessionImpl);
-      settableFuture.set(multiplexedSession);
+      final MultiplexedSession newSession = new MultiplexedSession(sessionImpl);
+      settableFuture.set(newSession);
+
       synchronized (lock) {
         if (multiplexedSessionFuture.get() != null && multiplexedSessionFuture.get().isDone()) {
           final MultiplexedSession oldSession = getMultiplexedSession().get();
@@ -3461,9 +3462,10 @@ class SessionPool {
             multiplexedSessionRemovedListener.apply(oldSession);
           }
         }
-        multiplexedSessionFuture
-            .get()
-            .set(new MultiplexedSessionFuture(settableFuture, tracer.getCurrentSpan()));
+        SettableApiFuture settableApiFuture = SettableApiFuture.create();
+        settableApiFuture.set(
+            new MultiplexedSessionFuture(settableFuture, tracer.getCurrentSpan()));
+        multiplexedSessionFuture.set(settableApiFuture);
         multiplexedSessionBeingCreated = false;
       }
     }
