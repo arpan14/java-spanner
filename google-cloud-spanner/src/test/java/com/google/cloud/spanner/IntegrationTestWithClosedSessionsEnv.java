@@ -86,6 +86,11 @@ public class IntegrationTestWithClosedSessionsEnv extends IntegrationTestEnv {
       return session;
     }
 
+    @Override
+    PooledSessionFuture getMultiplexedSession() {
+      return getSession();
+    }
+
     /**
      * Deleting a session server side takes some time. This method checks and waits until the
      * session really has been deleted.
