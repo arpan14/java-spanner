@@ -16,6 +16,7 @@
 
 package com.google.cloud.spanner;
 
+import static com.google.cloud.spanner.SessionClient.optionMap;
 import static com.google.cloud.spanner.SpannerExceptionFactory.newSpannerException;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -32,6 +33,7 @@ import com.google.cloud.spanner.AsyncResultSet.CallbackResponse;
 import com.google.cloud.spanner.AsyncResultSet.ReadyCallback;
 import com.google.cloud.spanner.Options.QueryOption;
 import com.google.cloud.spanner.Options.ReadOption;
+import com.google.cloud.spanner.SessionClient.SessionOption;
 import com.google.cloud.spanner.SessionImpl.SessionTransaction;
 import com.google.cloud.spanner.spi.v1.SpannerRpc;
 import com.google.common.annotations.VisibleForTesting;
@@ -380,7 +382,7 @@ abstract class AbstractReadContext
                   .setOptions(options)
                   .build();
           Transaction transaction =
-              rpc.beginTransaction(request, session.getOptions(), isRouteToLeader());
+              rpc.beginTransaction(request, getOptions(session.getOptions()), isRouteToLeader());
           if (!transaction.hasReadTimestamp()) {
             throw SpannerExceptionFactory.newSpannerException(
                 ErrorCode.INTERNAL, "Missing expected transaction.read_timestamp metadata field");
@@ -437,6 +439,9 @@ abstract class AbstractReadContext
 
   protected static final String NO_TRANSACTION_RETURNED_MSG =
       "The statement did not return a transaction even though one was requested";
+
+  @GuardedBy("this")
+  private volatile long channelHintCounter;
 
   AbstractReadContext(Builder<?, ?> builder) {
     this.session = builder.session;
@@ -728,7 +733,10 @@ abstract class AbstractReadContext
             span.addAnnotation("Starting Query");
             SpannerRpc.StreamingCall call =
                 rpc.executeQuery(
-                    request.build(), stream.consumer(), session.getOptions(), isRouteToLeader());
+                    request.build(),
+                    stream.consumer(),
+                    getOptions(session.getOptions()),
+                    isRouteToLeader());
             session.markUsed(clock.instant());
             call.request(prefetchChunks);
             stream.setCall(call, request.getTransaction().hasBegin());
@@ -737,6 +745,17 @@ abstract class AbstractReadContext
         };
     return new GrpcResultSet(
         stream, this, options.hasDecodeMode() ? options.decodeMode() : defaultDecodeMode);
+  }
+
+  Map<SpannerRpc.Option, ?> getOptions(Map<SpannerRpc.Option, ?> sessionRpcOptions) {
+    if (sessionRpcOptions != null) {
+      return sessionRpcOptions;
+    }
+    final Map<SpannerRpc.Option, ?> options;
+    synchronized (this) {
+      options = optionMap(SessionOption.channelHint(channelHintCounter++));
+    }
+    return options;
   }
 
   /**
@@ -874,7 +893,10 @@ abstract class AbstractReadContext
             span.addAnnotation("Starting Read");
             SpannerRpc.StreamingCall call =
                 rpc.read(
-                    builder.build(), stream.consumer(), session.getOptions(), isRouteToLeader());
+                    builder.build(),
+                    stream.consumer(),
+                    getOptions(session.getOptions()),
+                    isRouteToLeader());
             session.markUsed(clock.instant());
             call.request(prefetchChunks);
             stream.setCall(call, /* withBeginTransaction = */ builder.getTransaction().hasBegin());
