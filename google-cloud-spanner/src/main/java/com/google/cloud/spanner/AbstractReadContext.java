@@ -440,8 +440,7 @@ abstract class AbstractReadContext
   protected static final String NO_TRANSACTION_RETURNED_MSG =
       "The statement did not return a transaction even though one was requested";
 
-  @GuardedBy("this")
-  private volatile long channelHintCounter;
+  private AtomicLong channelHintCounter = new AtomicLong();
 
   AbstractReadContext(Builder<?, ?> builder) {
     this.session = builder.session;
@@ -753,7 +752,7 @@ abstract class AbstractReadContext
     }
     final Map<SpannerRpc.Option, ?> options;
     synchronized (this) {
-      options = optionMap(SessionOption.channelHint(channelHintCounter++));
+      options = optionMap(SessionOption.channelHint(channelHintCounter.incrementAndGet()));
     }
     return options;
   }
