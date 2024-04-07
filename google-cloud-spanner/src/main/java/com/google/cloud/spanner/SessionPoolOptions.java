@@ -69,7 +69,6 @@ public class SessionPoolOptions {
   /** Property for allowing mocking of session maintenance clock. */
   private final Clock poolMaintainerClock;
 
-  private final Duration waitForMultiplexedSession;
   private final boolean useMultiplexedSession;
   private final Duration multiplexedSessionMaintenanceDuration;
 
@@ -99,7 +98,6 @@ public class SessionPoolOptions {
     this.poolMaintainerClock = builder.poolMaintainerClock;
     this.useMultiplexedSession = builder.useMultiplexedSession;
     this.multiplexedSessionMaintenanceDuration = builder.multiplexedSessionMaintenanceDuration;
-    this.waitForMultiplexedSession = builder.waitForMultiplexedSession;
   }
 
   @Override
@@ -133,8 +131,8 @@ public class SessionPoolOptions {
         && Objects.equals(this.poolMaintainerClock, other.poolMaintainerClock)
         && Objects.equals(this.useMultiplexedSession, other.useMultiplexedSession)
         && Objects.equals(
-            this.multiplexedSessionMaintenanceDuration, other.multiplexedSessionMaintenanceDuration)
-        && Objects.equals(this.waitForMultiplexedSession, other.waitForMultiplexedSession);
+            this.multiplexedSessionMaintenanceDuration,
+            other.multiplexedSessionMaintenanceDuration);
   }
 
   @Override
@@ -161,8 +159,7 @@ public class SessionPoolOptions {
         this.inactiveTransactionRemovalOptions,
         this.poolMaintainerClock,
         this.useMultiplexedSession,
-        this.multiplexedSessionMaintenanceDuration,
-        this.waitForMultiplexedSession);
+        this.multiplexedSessionMaintenanceDuration);
   }
 
   public Builder toBuilder() {
@@ -291,10 +288,6 @@ public class SessionPoolOptions {
 
   Duration getMultiplexedSessionMaintenanceDuration() {
     return multiplexedSessionMaintenanceDuration;
-  }
-
-  Duration getWaitForMultiplexedSession() {
-    return waitForMultiplexedSession;
   }
 
   public static Builder newBuilder() {
@@ -495,7 +488,6 @@ public class SessionPoolOptions {
 
     private boolean useMultiplexedSession = false;
     private Duration multiplexedSessionMaintenanceDuration = Duration.ofDays(7);
-    private Duration waitForMultiplexedSession = Duration.ofSeconds(10);
     private Clock poolMaintainerClock;
 
     private static Position getReleaseToPositionFromSystemProperty() {
@@ -718,24 +710,6 @@ public class SessionPoolOptions {
     Builder setMultiplexedSessionMaintenanceDuration(
         Duration multiplexedSessionMaintenanceDuration) {
       this.multiplexedSessionMaintenanceDuration = multiplexedSessionMaintenanceDuration;
-      return this;
-    }
-
-    /**
-     * This option is only used when {@link SessionPoolOptions#useMultiplexedSession} is set to
-     * true. If greater than zero, calls to {@link Spanner#getDatabaseClient(DatabaseId)} will block
-     * for up to the given duration while waiting for the multiplexed session to be created. The
-     * default value for this is 10 seconds.
-     *
-     * <p>If this is set to null or zero, the client does not wait for the session to be created,
-     * which means that the first read requests could see more latency, as they will need to wait
-     * until the multiplexed session has been created.
-     *
-     * <p>Note that we would need to use the option {@link SessionPoolOptions#waitForMinSessions} if
-     * we want a similar blocking behavior for the other sessions within the session pool.
-     */
-    Builder setWaitForMultiplexedSession(Duration waitForMultiplexedSession) {
-      this.waitForMultiplexedSession = waitForMultiplexedSession;
       return this;
     }
 
