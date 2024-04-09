@@ -1695,8 +1695,7 @@ class SessionPool {
     @Override
     public MultiplexedSession get() {
       try {
-        MultiplexedSession res = super.get();
-        return res;
+        return super.get();
       } catch (ExecutionException e) {
         throw SpannerExceptionFactory.newSpannerException(e.getCause());
       } catch (InterruptedException e) {
@@ -2546,7 +2545,9 @@ class SessionPool {
       try {
         if (options.getUseMultiplexedSession()) {
           synchronized (lock) {
-            if (getMultiplexedSession().get() != null && isMultiplexedSessionStale(currentTime)) {
+            if (getMultiplexedSession().isDone()
+                && getMultiplexedSession().get() != null
+                && isMultiplexedSessionStale(currentTime)) {
               final Instant minExecutionTime =
                   multiplexedSessionReplacementAttemptTime.plus(
                       multiplexedSessionCreationRetryDelay);
@@ -3021,12 +3022,12 @@ class SessionPool {
    */
   SessionFutureWrapper getMultiplexedSessionWithFallback() throws SpannerException {
     if (options.getUseMultiplexedSession()) {
-      ISpan span = tracer.getCurrentSpan();
       try {
         SessionFutureWrapper sessionFuture = getWrappedMultiplexedSessionFuture();
         incrementNumSessionsInUse(true);
         return sessionFuture;
       } catch (Throwable t) {
+        ISpan span = tracer.getCurrentSpan();
         span.addAnnotation("No multiplexed session available.");
         throw SpannerExceptionFactory.asSpannerException(t.getCause());
       }
@@ -3040,13 +3041,7 @@ class SessionPool {
   }
 
   MultiplexedSessionFuture getMultiplexedSession() {
-    try {
-      return currentMultiplexedSessionReference.get().get();
-    } catch (InterruptedException interruptedException) {
-      throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
-    } catch (ExecutionException executionException) {
-      throw SpannerExceptionFactory.asSpannerException(executionException.getCause());
-    }
+    return (MultiplexedSessionFuture) getWrappedMultiplexedSessionFuture().get();
   }
 
   /**
@@ -3466,12 +3461,6 @@ class SessionPool {
     }
   }
 
-  private void handleCreateMultiplexedSessionFailure(SpannerException e) {
-    synchronized (lock) {
-      currentMultiplexedSessionReference.get().setException(e);
-    }
-  }
-
   private void createSessions(final int sessionCount, boolean distributeOverChannels) {
     logger.log(Level.FINE, String.format("Creating %d sessions", sessionCount));
     synchronized (lock) {
@@ -3582,8 +3571,8 @@ class SessionPool {
     public void onSessionCreateFailure(Throwable t, int createFailureForSessionCount) {
       synchronized (lock) {
         multiplexedSessionBeingCreated = false;
+        currentMultiplexedSessionReference.get().setException(newSpannerException(t));
       }
-      handleCreateMultiplexedSessionFailure(newSpannerException(t));
     }
   }
 
