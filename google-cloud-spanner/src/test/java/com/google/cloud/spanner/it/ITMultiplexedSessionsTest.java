@@ -139,7 +139,7 @@ public class ITMultiplexedSessionsTest {
   }
 
   @Test
-  public void pointReadAsync() throws Exception {
+  public void multiplePointReads_whenExecutedAsync() throws Exception {
     ListeningScheduledExecutorService service =
         MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(10));
     List<ListenableFuture<Struct>> listenableFutures = new ArrayList();
@@ -148,6 +148,19 @@ public class ITMultiplexedSessionsTest {
     }
     for (ListenableFuture<Struct> listenableFuture : listenableFutures) {
       Struct row = listenableFuture.get();
+      assertThat(row).isNotNull();
+      assertThat(row.getString(0)).isEqualTo("k1");
+      assertThat(row.getString(1)).isEqualTo("v1");
+      // Ensure that the Struct implementation supports equality properly.
+      assertThat(row)
+          .isEqualTo(Struct.newBuilder().set("key").to("k1").set("stringvalue").to("v1").build());
+    }
+  }
+
+  @Test
+  public void multiplePointReads_whenExecutedSync() {
+    for(int i = 0; i < 10; i++) {
+      Struct row = executeReadRow();
       assertThat(row).isNotNull();
       assertThat(row.getString(0)).isEqualTo("k1");
       assertThat(row.getString(1)).isEqualTo("v1");

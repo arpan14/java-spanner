@@ -181,10 +181,12 @@ abstract class AbstractReadContext
 
     @GuardedBy("lock")
     private boolean used;
+    private Long channelHint;
 
     private SingleReadContext(Builder builder) {
       super(builder);
       this.bound = builder.bound;
+      this.channelHint = CHANNEL_HINT_COUNTER.incrementAndGet();
     }
 
     @Override
@@ -211,6 +213,11 @@ abstract class AbstractReadContext
           .setSingleUse(TransactionOptions.newBuilder().setReadOnly(bound.toProto()))
           .build();
     }
+
+    @Override
+    long getTransactionChannelHint() {
+      return channelHint;
+    }
   }
 
   private static void assertTimestampAvailable(boolean available) {
@@ -219,11 +226,14 @@ abstract class AbstractReadContext
 
   static class SingleUseReadOnlyTransaction extends SingleReadContext
       implements ReadOnlyTransaction {
+
     @GuardedBy("lock")
     private Timestamp timestamp;
+    private Long channelHint;
 
     private SingleUseReadOnlyTransaction(SingleReadContext.Builder builder) {
       super(builder);
+      this.channelHint = CHANNEL_HINT_COUNTER.incrementAndGet();
     }
 
     @Override
@@ -256,6 +266,11 @@ abstract class AbstractReadContext
               ErrorCode.INTERNAL, "Bad value in transaction.read_timestamp metadata field", e);
         }
       }
+    }
+
+    @Override
+    public long getTransactionChannelHint() {
+      return channelHint;
     }
   }
 
@@ -302,6 +317,8 @@ abstract class AbstractReadContext
     @GuardedBy("txnLock")
     private ByteString transactionId;
 
+    private Long channelHint;
+
     MultiUseReadOnlyTransaction(Builder builder) {
       super(builder);
       checkArgument(
@@ -320,8 +337,13 @@ abstract class AbstractReadContext
         this.timestamp = builder.timestamp;
         this.transactionId = builder.transactionId;
       }
+      this.channelHint = CHANNEL_HINT_COUNTER.incrementAndGet();
     }
 
+    @Override
+    public long getTransactionChannelHint() {
+      return channelHint;
+    }
     @Override
     protected boolean isRouteToLeader() {
       return false;
@@ -382,7 +404,7 @@ abstract class AbstractReadContext
                   .setOptions(options)
                   .build();
           Transaction transaction =
-              rpc.beginTransaction(request, getOptions(session.getOptions()), isRouteToLeader());
+              rpc.beginTransaction(request, getOptions(session.getOptions(), getTransactionChannelHint()), isRouteToLeader());
           if (!transaction.hasReadTimestamp()) {
             throw SpannerExceptionFactory.newSpannerException(
                 ErrorCode.INTERNAL, "Missing expected transaction.read_timestamp metadata field");
@@ -433,14 +455,14 @@ abstract class AbstractReadContext
   // ignored for query by the server.
   private AtomicLong seqNo = new AtomicLong();
 
+  static AtomicLong CHANNEL_HINT_COUNTER = new AtomicLong();
+
   // Allow up to 512MB to be buffered (assuming 1MB chunks). In practice, restart tokens are sent
   // much more frequently.
   private static final int MAX_BUFFERED_CHUNKS = 512;
 
   protected static final String NO_TRANSACTION_RETURNED_MSG =
       "The statement did not return a transaction even though one was requested";
-
-  private AtomicLong channelHintCounter = new AtomicLong();
 
   AbstractReadContext(Builder<?, ?> builder) {
     this.session = builder.session;
@@ -734,7 +756,7 @@ abstract class AbstractReadContext
                 rpc.executeQuery(
                     request.build(),
                     stream.consumer(),
-                    getOptions(session.getOptions()),
+                    getOptions(session.getOptions(), getTransactionChannelHint()),
                     isRouteToLeader());
             session.markUsed(clock.instant());
             call.request(prefetchChunks);
@@ -746,13 +768,14 @@ abstract class AbstractReadContext
         stream, this, options.hasDecodeMode() ? options.decodeMode() : defaultDecodeMode);
   }
 
-  Map<SpannerRpc.Option, ?> getOptions(Map<SpannerRpc.Option, ?> sessionRpcOptions) {
-    if (sessionRpcOptions != null) {
-      return sessionRpcOptions;
+  Map<SpannerRpc.Option, ?> getOptions(
+      Map<SpannerRpc.Option, ?> channelHintForSession, long channelHintForTransaction) {
+    if (channelHintForSession != null) {
+      return channelHintForSession;
     }
     final Map<SpannerRpc.Option, ?> options;
     synchronized (this) {
-      options = optionMap(SessionOption.channelHint(channelHintCounter.incrementAndGet()));
+      options = optionMap(SessionOption.channelHint(channelHintForTransaction));
     }
     return options;
   }
@@ -800,6 +823,12 @@ abstract class AbstractReadContext
    */
   @Nullable
   abstract TransactionSelector getTransactionSelector();
+
+  /**
+   * Channel hint to be used for a transaction. This enables soft-stickiness per transaction by
+   * ensuring all RPCs within a transaction land up on the same channel.
+   */
+  abstract long getTransactionChannelHint();
 
   /**
    * Returns the transaction tag for this {@link AbstractReadContext} or <code>null</code> if this
@@ -894,7 +923,7 @@ abstract class AbstractReadContext
                 rpc.read(
                     builder.build(),
                     stream.consumer(),
-                    getOptions(session.getOptions()),
+                    getOptions(session.getOptions(), getTransactionChannelHint()),
                     isRouteToLeader());
             session.markUsed(clock.instant());
             call.request(prefetchChunks);

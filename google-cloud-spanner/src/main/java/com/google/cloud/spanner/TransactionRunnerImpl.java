@@ -194,6 +194,8 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
     private CommitResponse commitResponse;
     private final Clock clock;
 
+    private Long channelHint;
+
     private TransactionContextImpl(Builder builder) {
       super(builder);
       this.transactionId = builder.transactionId;
@@ -201,6 +203,7 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
       this.options = builder.options;
       this.finishedAsyncOperations.set(null);
       this.clock = builder.clock;
+      this.channelHint = CHANNEL_HINT_COUNTER.incrementAndGet();
     }
 
     @Override
@@ -551,6 +554,11 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
       }
       // There is already a transactionId available. Include that id as the transaction to use.
       return TransactionSelector.newBuilder().setId(transactionId).build();
+    }
+
+    @Override
+    long getTransactionChannelHint() {
+      return channelHint;
     }
 
     @Override
