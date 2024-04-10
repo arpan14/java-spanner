@@ -88,8 +88,11 @@ public class TransactionManagerImplTest {
   @Before
   public void setUp() {
     initMocks(this);
-    manager = new TransactionManagerImpl(session, mock(TraceWrapper.class));
-    manager.setSpan(new OpenTelemetrySpan(mock(io.opentelemetry.api.trace.Span.class)));
+    manager =
+        new TransactionManagerImpl(
+            session,
+            new OpenTelemetrySpan(mock(io.opentelemetry.api.trace.Span.class)),
+            mock(TraceWrapper.class));
   }
 
   @Test
