@@ -1685,7 +1685,12 @@ class SessionPool {
     @Override
     public MultiplexedSession get() {
       try {
-        return super.get();
+        MultiplexedSession multiplexedSession = super.get();
+        if (multiplexedSession != null) {
+          // TODO arpanmishra@ to correct this
+          multiplexedSession.markBusy(tracer.getCurrentSpan());
+        }
+        return multiplexedSession;
       } catch (ExecutionException e) {
         throw SpannerExceptionFactory.newSpannerException(e.getCause());
       } catch (InterruptedException e) {
@@ -2025,6 +2030,8 @@ class SessionPool {
     public void markBusy(ISpan span) {
       // no-op for a multiplexed session since a new span is already created and set in context
       // for every handler invocation.
+      // TODO arpanmishra@ to make the long-term fix
+      this.delegate.setCurrentSpan(span);
     }
 
     @Override
@@ -2400,8 +2407,8 @@ class SessionPool {
             (long)
                 Math.ceil(
                     (double)
-                        ((options.getMinSessions() + options.getMaxIdleSessions())
-                            - numSessionsInUse)
+                            ((options.getMinSessions() + options.getMaxIdleSessions())
+                                - numSessionsInUse)
                         / numKeepAliveCycles);
       }
       // Now go over all the remaining sessions and see if they need to be kept alive explicitly.
@@ -2478,8 +2485,8 @@ class SessionPool {
                 Duration.between(session.getDelegate().getLastUseTime(), currentTime);
             if (!session.eligibleForLongRunning
                 && durationFromLastUse.compareTo(
-                inactiveTransactionRemovalOptions.getIdleTimeThreshold())
-                > 0) {
+                        inactiveTransactionRemovalOptions.getIdleTimeThreshold())
+                    > 0) {
               if ((options.warnInactiveTransactions() || options.warnAndCloseInactiveTransactions())
                   && !session.isLeakedExceptionLogged) {
                 if (options.warnAndCloseInactiveTransactions()) {
@@ -2501,7 +2508,7 @@ class SessionPool {
                 }
               }
               if ((options.closeInactiveTransactions()
-                  || options.warnAndCloseInactiveTransactions())
+                      || options.warnAndCloseInactiveTransactions())
                   && session.state != SessionState.CLOSING) {
                 final boolean isRemoved = removeFromPool(session);
                 if (isRemoved) {
@@ -2977,7 +2984,7 @@ class SessionPool {
     Iterator<PooledSession> iterator = queue.iterator();
     while (iterator.hasNext()
         && (numChecked + numAlreadyChecked)
-        < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
+            < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
       PooledSession session = iterator.next();
       if (session.delegate.getLastUseTime().isBefore(keepAliveThreshold)) {
         iterator.remove();

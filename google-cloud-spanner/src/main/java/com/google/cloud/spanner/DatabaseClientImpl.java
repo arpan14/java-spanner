@@ -21,6 +21,7 @@ import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.Options.TransactionOption;
 import com.google.cloud.spanner.Options.UpdateOption;
 import com.google.cloud.spanner.SessionPool.PooledSessionFuture;
+import com.google.cloud.spanner.SessionPool.SessionFuture;
 import com.google.cloud.spanner.SpannerImpl.ClosedException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -53,8 +54,8 @@ class DatabaseClientImpl implements DatabaseClient {
   }
 
   @VisibleForTesting
-  Session getMultiplexedSession() {
-    return pool.getMultiplexedSessionWithFallback();
+  SessionFuture getMultiplexedSession() {
+    return pool.getMultiplexedSessionWithFallback().get();
   }
 
   @Override
