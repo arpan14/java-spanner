@@ -82,7 +82,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 0)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
-  @State(Scope.Benchmark)
+  @State(Scope.Thread)
   public static class BenchmarkState {
 
     // TODO(developer): Add your values here for PROJECT_ID, INSTANCE_ID, DATABASE_ID
