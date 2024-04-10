@@ -262,6 +262,11 @@
       <version>0.25.2</version>
     </dependency>
     <dependency>
+      <groupId>com.google.cloud.opentelemetry</groupId>
+      <artifactId>exporter-metrics</artifactId>
+      <version>0.25.2</version>
+    </dependency>
+    <dependency>
       <groupId>io.opencensus</groupId>
       <artifactId>opencensus-exporter-stats-stackdriver</artifactId>
       <version>0.31.1</version>
