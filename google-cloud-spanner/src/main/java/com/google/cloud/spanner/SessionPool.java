@@ -1689,6 +1689,7 @@ class SessionPool {
         if (multiplexedSession != null) {
           // TODO arpanmishra@ to correct this
           multiplexedSession.markBusy(tracer.getCurrentSpan());
+          incrementNumSessionsInUse(true);
         }
         return multiplexedSession;
       } catch (ExecutionException e) {
@@ -2152,6 +2153,7 @@ class SessionPool {
 
     @Override
     public void close() {
+      /**
       synchronized (lock) {
         numMultiplexedSessionsReleased++;
         if (lastException != null && isDatabaseOrInstanceNotFound(lastException)) {
@@ -2161,6 +2163,7 @@ class SessionPool {
                   (ResourceNotFoundException) lastException);
         }
       }
+       */
     }
 
     @Override
@@ -3009,9 +3012,7 @@ class SessionPool {
   SessionFutureWrapper getMultiplexedSessionWithFallback() throws SpannerException {
     if (options.getUseMultiplexedSession()) {
       try {
-        SessionFutureWrapper sessionFuture = getWrappedMultiplexedSessionFuture();
-        incrementNumSessionsInUse(true);
-        return sessionFuture;
+        return getWrappedMultiplexedSessionFuture();
       } catch (Throwable t) {
         ISpan span = tracer.getCurrentSpan();
         span.addAnnotation("No multiplexed session available.");
