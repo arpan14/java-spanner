@@ -32,10 +32,8 @@ final class TransactionManagerImpl implements TransactionManager, SessionTransac
   private TransactionRunnerImpl.TransactionContextImpl txn;
   private TransactionState txnState;
 
-  TransactionManagerImpl(
-      SessionImpl session, ISpan span, TraceWrapper tracer, TransactionOption... options) {
+  TransactionManagerImpl(SessionImpl session, TraceWrapper tracer, TransactionOption... options) {
     this.session = session;
-    this.span = span;
     this.tracer = tracer;
     this.options = Options.fromTransactionOptions(options);
   }

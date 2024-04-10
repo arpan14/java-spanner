@@ -41,7 +41,8 @@ public class AsyncTransactionManagerImplTest {
     ISpan span = new OpenTelemetrySpan(oTspan);
     when(oTspan.makeCurrent()).thenReturn(mock(Scope.class));
     try (AsyncTransactionManagerImpl manager =
-        new AsyncTransactionManagerImpl(session, span, Options.commitStats())) {
+        new AsyncTransactionManagerImpl(session, Options.commitStats())) {
+      manager.setSpan(span);
       when(session.newTransaction(Options.fromTransactionOptions(Options.commitStats())))
           .thenReturn(transaction);
       when(transaction.ensureTxnAsync()).thenReturn(ApiFutures.immediateFuture(null));

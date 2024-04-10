@@ -406,7 +406,7 @@ public class SpanTest {
 
   private void verifyAnnotations(List<String> actualAnnotations, List<String> expectedAnnotations) {
     assertEquals(
-        actualAnnotations.stream().distinct().sorted().collect(Collectors.toList()),
-        expectedAnnotations.stream().sorted().collect(Collectors.toList()));
+        expectedAnnotations.stream().sorted().collect(Collectors.toList()),
+        actualAnnotations.stream().distinct().sorted().collect(Collectors.toList()));
   }
 }

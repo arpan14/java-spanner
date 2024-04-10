@@ -53,6 +53,9 @@ import com.google.cloud.Timestamp;
 import com.google.cloud.Tuple;
 import com.google.cloud.grpc.GrpcTransportOptions;
 import com.google.cloud.grpc.GrpcTransportOptions.ExecutorFactory;
+import com.google.cloud.spanner.AbstractReadContext.MultiUseReadOnlyTransaction;
+import com.google.cloud.spanner.AbstractReadContext.SingleReadContext;
+import com.google.cloud.spanner.AbstractReadContext.SingleUseReadOnlyTransaction;
 import com.google.cloud.spanner.Options.QueryOption;
 import com.google.cloud.spanner.Options.ReadOption;
 import com.google.cloud.spanner.Options.TransactionOption;
@@ -985,18 +988,23 @@ class SessionPool {
     private final TransactionOption[] options;
     private TransactionRunner runner;
 
+    private final ISpan span;
+
     private SessionPoolTransactionRunner(
         I session,
         SessionReplacementHandler sessionReplacementHandler,
+        ISpan span,
         TransactionOption... options) {
       this.session = session;
       this.options = options;
       this.sessionReplacementHandler = sessionReplacementHandler;
+      this.span = span;
     }
 
     private TransactionRunner getRunner() {
       if (this.runner == null) {
         this.runner = session.get().readWriteTransaction(options);
+        ((TransactionRunnerImpl) this.runner).setSpan(span);
       }
       return runner;
     }
@@ -1284,7 +1292,9 @@ class SessionPool {
         return new AutoClosingReadContext<>(
             session -> {
               PooledSession ps = session.get();
-              return ps.delegate.singleUse();
+              SingleReadContext singleReadContext = (SingleReadContext) ps.delegate.singleUse();
+              singleReadContext.setSpan(span);
+              return singleReadContext;
             },
             SessionPool.this,
             pooledSessionReplacementHandler,
@@ -1302,7 +1312,10 @@ class SessionPool {
         return new AutoClosingReadContext<>(
             session -> {
               PooledSession ps = session.get();
-              return ps.delegate.singleUse(bound);
+              SingleReadContext singleReadContext =
+                  (SingleReadContext) ps.delegate.singleUse(bound);
+              singleReadContext.setSpan(span);
+              return singleReadContext;
             },
             SessionPool.this,
             pooledSessionReplacementHandler,
@@ -1319,7 +1332,10 @@ class SessionPool {
       return internalReadOnlyTransaction(
           session -> {
             PooledSession ps = session.get();
-            return ps.delegate.singleUseReadOnlyTransaction();
+            SingleUseReadOnlyTransaction singleUseReadOnlyTransaction =
+                (SingleUseReadOnlyTransaction) ps.delegate.singleUseReadOnlyTransaction();
+            singleUseReadOnlyTransaction.setSpan(span);
+            return singleUseReadOnlyTransaction;
           },
           true);
     }
@@ -1329,7 +1345,10 @@ class SessionPool {
       return internalReadOnlyTransaction(
           session -> {
             PooledSession ps = session.get();
-            return ps.delegate.singleUseReadOnlyTransaction(bound);
+            SingleUseReadOnlyTransaction singleUseReadOnlyTransaction =
+                (SingleUseReadOnlyTransaction) ps.delegate.singleUseReadOnlyTransaction(bound);
+            singleUseReadOnlyTransaction.setSpan(span);
+            return singleUseReadOnlyTransaction;
           },
           true);
     }
@@ -1339,7 +1358,10 @@ class SessionPool {
       return internalReadOnlyTransaction(
           session -> {
             PooledSession ps = session.get();
-            return ps.delegate.readOnlyTransaction();
+            MultiUseReadOnlyTransaction multiUseReadOnlyTransaction =
+                (MultiUseReadOnlyTransaction) ps.delegate.readOnlyTransaction();
+            multiUseReadOnlyTransaction.setSpan(span);
+            return multiUseReadOnlyTransaction;
           },
           false);
     }
@@ -1349,7 +1371,10 @@ class SessionPool {
       return internalReadOnlyTransaction(
           session -> {
             PooledSession ps = session.get();
-            return ps.delegate.readOnlyTransaction(bound);
+            MultiUseReadOnlyTransaction multiUseReadOnlyTransaction =
+                (MultiUseReadOnlyTransaction) ps.delegate.readOnlyTransaction(bound);
+            multiUseReadOnlyTransaction.setSpan(span);
+            return multiUseReadOnlyTransaction;
           },
           false);
     }
@@ -1372,7 +1397,8 @@ class SessionPool {
 
     @Override
     public TransactionRunner readWriteTransaction(TransactionOption... options) {
-      return new SessionPoolTransactionRunner<>(this, pooledSessionReplacementHandler, options);
+      return new SessionPoolTransactionRunner<>(
+          this, pooledSessionReplacementHandler, span, options);
     }
 
     @Override
@@ -1618,7 +1644,7 @@ class SessionPool {
     @Override
     public TransactionRunner readWriteTransaction(TransactionOption... options) {
       return new SessionPoolTransactionRunner<>(
-          this, multiplexedSessionReplacementHandler, options);
+          this, multiplexedSessionReplacementHandler, null, options);
     }
 
     @Override
@@ -1923,15 +1949,11 @@ class SessionPool {
 
     private void keepAlive() {
       markUsed();
-      final ISpan previousSpan = delegate.getCurrentSpan();
-      delegate.setCurrentSpan(tracer.getBlankSpan());
       try (ResultSet resultSet =
           delegate
               .singleUse(TimestampBound.ofMaxStaleness(60, TimeUnit.SECONDS))
               .executeQuery(Statement.newBuilder("SELECT 1").build())) {
         resultSet.next();
-      } finally {
-        delegate.setCurrentSpan(previousSpan);
       }
     }
 
@@ -1970,7 +1992,6 @@ class SessionPool {
 
     @Override
     public void markBusy(ISpan span) {
-      this.delegate.setCurrentSpan(span);
       this.state = SessionState.BUSY;
     }
 
@@ -2400,8 +2421,8 @@ class SessionPool {
             (long)
                 Math.ceil(
                     (double)
-                        ((options.getMinSessions() + options.getMaxIdleSessions())
-                            - numSessionsInUse)
+                            ((options.getMinSessions() + options.getMaxIdleSessions())
+                                - numSessionsInUse)
                         / numKeepAliveCycles);
       }
       // Now go over all the remaining sessions and see if they need to be kept alive explicitly.
@@ -2478,8 +2499,8 @@ class SessionPool {
                 Duration.between(session.getDelegate().getLastUseTime(), currentTime);
             if (!session.eligibleForLongRunning
                 && durationFromLastUse.compareTo(
-                inactiveTransactionRemovalOptions.getIdleTimeThreshold())
-                > 0) {
+                        inactiveTransactionRemovalOptions.getIdleTimeThreshold())
+                    > 0) {
               if ((options.warnInactiveTransactions() || options.warnAndCloseInactiveTransactions())
                   && !session.isLeakedExceptionLogged) {
                 if (options.warnAndCloseInactiveTransactions()) {
@@ -2501,7 +2522,7 @@ class SessionPool {
                 }
               }
               if ((options.closeInactiveTransactions()
-                  || options.warnAndCloseInactiveTransactions())
+                      || options.warnAndCloseInactiveTransactions())
                   && session.state != SessionState.CLOSING) {
                 final boolean isRemoved = removeFromPool(session);
                 if (isRemoved) {
@@ -2977,7 +2998,7 @@ class SessionPool {
     Iterator<PooledSession> iterator = queue.iterator();
     while (iterator.hasNext()
         && (numChecked + numAlreadyChecked)
-        < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
+            < (options.getMinSessions() + options.getMaxIdleSessions() - numSessionsInUse)) {
       PooledSession session = iterator.next();
       if (session.delegate.getLastUseTime().isBefore(keepAliveThreshold)) {
         iterator.remove();

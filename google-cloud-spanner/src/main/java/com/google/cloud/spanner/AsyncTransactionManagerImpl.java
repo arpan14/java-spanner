@@ -41,9 +41,8 @@ final class AsyncTransactionManagerImpl
   private TransactionState txnState;
   private final SettableApiFuture<CommitResponse> commitResponse = SettableApiFuture.create();
 
-  AsyncTransactionManagerImpl(SessionImpl session, ISpan span, TransactionOption... options) {
+  AsyncTransactionManagerImpl(SessionImpl session, TransactionOption... options) {
     this.session = session;
-    this.span = span;
     this.options = Options.fromTransactionOptions(options);
   }
 
