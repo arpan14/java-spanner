@@ -75,7 +75,7 @@ import org.mockito.MockitoAnnotations;
 public class SessionImplTest {
   @Mock private SpannerRpc rpc;
   @Mock private SpannerOptions spannerOptions;
-  private com.google.cloud.spanner.Session session;
+  private SessionImpl session;
   @Captor private ArgumentCaptor<Map<SpannerRpc.Option, Object>> optionsCaptor;
   private Map<SpannerRpc.Option, Object> options;
 

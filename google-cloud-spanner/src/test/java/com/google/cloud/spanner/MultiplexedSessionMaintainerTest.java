@@ -130,7 +130,7 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     SessionFutureWrapper session2 = pool.getMultiplexedSessionWithFallback();
     assertNotEquals(session1.get().getName(), session2.get().getName());
     assertEquals(1, multiplexedSessionsRemoved.size());
-    assertTrue(getNameOfSessionRemoved().contains(session1.get().get().getName()));
+    assertTrue(getNameOfSessionRemoved().contains(session1.get().getCachedSession().getName()));
 
     // Advance clock by 8 days
     clock.currentTimeMillis.addAndGet(Duration.ofDays(8).toMillis());
@@ -142,7 +142,7 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     SessionFutureWrapper session3 = pool.getMultiplexedSessionWithFallback();
     assertNotEquals(session2.get().getName(), session3.get().getName());
     assertEquals(2, multiplexedSessionsRemoved.size());
-    assertTrue(getNameOfSessionRemoved().contains(session2.get().get().getName()));
+    assertTrue(getNameOfSessionRemoved().contains(session2.get().getCachedSession().getName()));
   }
 
   @Test
@@ -252,7 +252,7 @@ public class MultiplexedSessionMaintainerTest extends BaseSessionPoolTest {
     // the last attempt.
     runMaintenanceLoop(clock, pool, 1);
     SessionFutureWrapper session3 = pool.getMultiplexedSessionWithFallback();
-    assertTrue(getNameOfSessionRemoved().contains(session1.get().get().getName()));
+    assertTrue(getNameOfSessionRemoved().contains(session1.get().getCachedSession().getName()));
     assertNotEquals(session1.get().getName(), session3.get().getName());
     verify(sessionClient, times(2))
         .createMultiplexedSession(any(MultiplexedSessionMaintainerConsumer.class));

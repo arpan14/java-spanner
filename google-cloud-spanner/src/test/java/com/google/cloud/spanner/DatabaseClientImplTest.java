@@ -2334,11 +2334,12 @@ public class DatabaseClientImplTest {
     DatabaseClient client =
         spannerWithEmptySessionPool.getDatabaseClient(
             DatabaseId.of(TEST_PROJECT, TEST_INSTANCE, TEST_DATABASE));
-    try (ResultSet rs = client.singleUse().executeQuery(SELECT1)) {
+    try (ReadContext readContext = client.singleUse();
+        ResultSet resultSet = readContext.executeQuery(SELECT1)) {
       mockSpanner.unfreeze();
-      assertThat(rs.next()).isTrue();
-      assertThat(rs.getLong(0)).isEqualTo(1L);
-      assertThat(rs.next()).isFalse();
+      assertThat(resultSet.next()).isTrue();
+      assertThat(resultSet.getLong(0)).isEqualTo(1L);
+      assertThat(resultSet.next()).isFalse();
     }
   }
 

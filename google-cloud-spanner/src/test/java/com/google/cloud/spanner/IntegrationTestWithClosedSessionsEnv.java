@@ -18,6 +18,7 @@ package com.google.cloud.spanner;
 
 import com.google.cloud.spanner.SessionPool.PooledSession;
 import com.google.cloud.spanner.SessionPool.PooledSessionFuture;
+import com.google.cloud.spanner.SessionPool.SessionFutureWrapper;
 import com.google.cloud.spanner.testing.RemoteSpannerHelper;
 
 /**
@@ -84,6 +85,20 @@ public class IntegrationTestWithClosedSessionsEnv extends IntegrationTestEnv {
       }
       session.get().setAllowReplacing(allowReplacing);
       return session;
+    }
+
+    @Override
+    SessionFutureWrapper getMultiplexedSession() {
+      SessionFutureWrapper sessionFutureWrapper = super.getMultiplexedSession();
+      if (invalidateNextSession) {
+        sessionFutureWrapper.get().getCachedSession().getDelegate().close();
+        sessionFutureWrapper.get().getCachedSession().setAllowReplacing(false);
+        awaitDeleted(sessionFutureWrapper.get().getCachedSession().getDelegate());
+        sessionFutureWrapper.get().getCachedSession().setAllowReplacing(allowReplacing);
+        invalidateNextSession = false;
+      }
+      sessionFutureWrapper.get().getCachedSession().setAllowReplacing(allowReplacing);
+      return sessionFutureWrapper;
     }
 
     /**

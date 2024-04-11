@@ -65,7 +65,7 @@ class SessionPoolAsyncTransactionManager<I extends SessionFuture>
             delegate.set(
                 SessionPoolAsyncTransactionManager.this
                     .session
-                    .get()
+                    .getCachedSession()
                     .transactionManagerAsync(options));
           } catch (Throwable t) {
             delegate.setException(t);
