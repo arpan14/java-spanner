@@ -1178,17 +1178,23 @@ class SessionPool {
   }
 
   class MultiplexedSessionFutureWrapper implements SessionFutureWrapper<MultiplexedSessionFuture> {
-    SettableApiFuture<MultiplexedSessionFuture> multiplexedSessionSettableApiFuture;
+    private SettableApiFuture<MultiplexedSessionFuture> multiplexedSessionSettableApiFuture;
+    private ISpan span;
 
     public MultiplexedSessionFutureWrapper(
-        SettableApiFuture<MultiplexedSessionFuture> multiplexedSessionSettableApiFuture) {
+        SettableApiFuture<MultiplexedSessionFuture> multiplexedSessionSettableApiFuture,
+        ISpan span) {
       this.multiplexedSessionSettableApiFuture = multiplexedSessionSettableApiFuture;
+      this.span = span;
     }
 
     @Override
     public MultiplexedSessionFuture get() {
       try {
-        return this.multiplexedSessionSettableApiFuture.get();
+        // Creating a new reference where the request's span state can be stored.
+        MultiplexedSessionFuture multiplexedSessionFuture =
+            new MultiplexedSessionFuture(this.multiplexedSessionSettableApiFuture.get(), span);
+        return multiplexedSessionFuture;
       } catch (InterruptedException interruptedException) {
         throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
       } catch (ExecutionException executionException) {
@@ -1477,9 +1483,13 @@ class SessionPool {
 
   class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<MultiplexedSession>
       implements SessionFuture {
+
+    private ISpan span;
+
     @VisibleForTesting
-    MultiplexedSessionFuture(ListenableFuture<MultiplexedSession> delegate) {
+    MultiplexedSessionFuture(ListenableFuture<MultiplexedSession> delegate, ISpan span) {
       super(delegate);
+      this.span = span;
     }
 
     @Override
@@ -1687,8 +1697,8 @@ class SessionPool {
       try {
         MultiplexedSession multiplexedSession = super.get();
         if (multiplexedSession != null) {
-          // TODO arpanmishra@ to correct this
-          multiplexedSession.markBusy(tracer.getCurrentSpan());
+          multiplexedSession.markBusy(span);
+          incrementNumSessionsInUse(true);
         }
         return multiplexedSession;
       } catch (ExecutionException e) {
@@ -2030,7 +2040,8 @@ class SessionPool {
     public void markBusy(ISpan span) {
       // no-op for a multiplexed session since a new span is already created and set in context
       // for every handler invocation.
-      // TODO arpanmishra@ to make the long-term fix
+      // TODO arpanmishra@ to make the long-term fix, this should be something different than
+      // SessionImpl
       this.delegate.setCurrentSpan(span);
     }
 
@@ -2675,7 +2686,6 @@ class SessionPool {
 
   private final AtomicReference<SettableApiFuture<MultiplexedSessionFuture>>
       currentMultiplexedSessionReference = new AtomicReference<>(SettableApiFuture.create());
-  MultiplexedSessionFutureWrapper wrappedMultiplexedSessionFuture = null;
 
   @GuardedBy("lock")
   private final Set<PooledSession> allSessions = new HashSet<>();
@@ -3008,12 +3018,10 @@ class SessionPool {
    */
   SessionFutureWrapper getMultiplexedSessionWithFallback() throws SpannerException {
     if (options.getUseMultiplexedSession()) {
+      ISpan span = tracer.getCurrentSpan();
       try {
-        SessionFutureWrapper sessionFuture = getWrappedMultiplexedSessionFuture();
-        incrementNumSessionsInUse(true);
-        return sessionFuture;
+        return getWrappedMultiplexedSessionFuture(span);
       } catch (Throwable t) {
-        ISpan span = tracer.getCurrentSpan();
         span.addAnnotation("No multiplexed session available.");
         throw SpannerExceptionFactory.asSpannerException(t.getCause());
       }
@@ -3022,8 +3030,8 @@ class SessionPool {
     }
   }
 
-  SessionFutureWrapper getWrappedMultiplexedSessionFuture() {
-    return wrappedMultiplexedSessionFuture;
+  SessionFutureWrapper getWrappedMultiplexedSessionFuture(ISpan span) {
+    return new MultiplexedSessionFutureWrapper(currentMultiplexedSessionReference.get(), span);
   }
 
   /**
@@ -3031,7 +3039,13 @@ class SessionPool {
    * SettableApiFuture<MultiplexedSessionFuture>} is resolved.
    */
   MultiplexedSessionFuture getMultiplexedSession() {
-    return (MultiplexedSessionFuture) getWrappedMultiplexedSessionFuture().get();
+    try {
+      return currentMultiplexedSessionReference.get().get();
+    } catch (InterruptedException e) {
+      throw SpannerExceptionFactory.propagateInterrupt(e);
+    } catch (ExecutionException e) {
+      throw SpannerExceptionFactory.asSpannerException(e.getCause());
+    }
   }
 
   /**
@@ -3497,9 +3511,8 @@ class SessionPool {
           oldSession = getMultiplexedSession().get();
         }
         SettableApiFuture<MultiplexedSessionFuture> settableApiFuture = SettableApiFuture.create();
-        settableApiFuture.set(new MultiplexedSessionFuture(settableFuture));
+        settableApiFuture.set(new MultiplexedSessionFuture(settableFuture, null));
         currentMultiplexedSessionReference.set(settableApiFuture);
-        wrappedMultiplexedSessionFuture = new MultiplexedSessionFutureWrapper(settableApiFuture);
         if (oldSession != null) {
           logger.log(
               Level.INFO,
@@ -3522,8 +3535,6 @@ class SessionPool {
     public void onSessionCreateFailure(Throwable t, int createFailureForSessionCount) {
       synchronized (lock) {
         multiplexedSessionBeingCreated = false;
-        wrappedMultiplexedSessionFuture =
-            new MultiplexedSessionFutureWrapper(currentMultiplexedSessionReference.get());
       }
       logger.log(
           Level.WARNING,
@@ -3548,8 +3559,7 @@ class SessionPool {
       synchronized (lock) {
         SettableApiFuture<MultiplexedSessionFuture> settableApiFuture =
             currentMultiplexedSessionReference.get();
-        settableApiFuture.set(new MultiplexedSessionFuture(settableFuture));
-        wrappedMultiplexedSessionFuture = new MultiplexedSessionFutureWrapper(settableApiFuture);
+        settableApiFuture.set(new MultiplexedSessionFuture(settableFuture, null));
         multiplexedSessionBeingCreated = false;
       }
     }
@@ -3563,8 +3573,6 @@ class SessionPool {
     public void onSessionCreateFailure(Throwable t, int createFailureForSessionCount) {
       synchronized (lock) {
         multiplexedSessionBeingCreated = false;
-        wrappedMultiplexedSessionFuture =
-            new MultiplexedSessionFutureWrapper(currentMultiplexedSessionReference.get());
         currentMultiplexedSessionReference.get().setException(newSpannerException(t));
       }
     }
