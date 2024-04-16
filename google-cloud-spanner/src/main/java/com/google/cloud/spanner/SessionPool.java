@@ -1159,7 +1159,7 @@ class SessionPool {
   }
 
   /** Wrapper class for the {@link SessionFuture} implementations. */
-  interface SessionFutureWrapper<T extends SessionFuture> {
+  interface SessionFutureWrapper<T extends SessionFuture> extends DatabaseClient {
 
     /** Method to resolve {@link SessionFuture} implementation for different use-cases. */
     T get();
@@ -1175,6 +1175,100 @@ class SessionPool {
     @Override
     public PooledSessionFuture get() {
       return this.pooledSessionFuture;
+    }
+
+    @Override
+    public Dialect getDialect() {
+      return get().getDialect();
+    }
+
+    @Override
+    public String getDatabaseRole() {
+      return get().getDatabaseRole();
+    }
+
+    @Override
+    public Timestamp write(Iterable<Mutation> mutations) throws SpannerException {
+      return get().write(mutations);
+    }
+
+    @Override
+    public CommitResponse writeWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      return get().writeWithOptions(mutations, options);
+    }
+
+    @Override
+    public Timestamp writeAtLeastOnce(Iterable<Mutation> mutations) throws SpannerException {
+      return get().writeAtLeastOnce(mutations);
+    }
+
+    @Override
+    public CommitResponse writeAtLeastOnceWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      return get().writeAtLeastOnceWithOptions(mutations, options);
+    }
+
+    @Override
+    public ServerStream<BatchWriteResponse> batchWriteAtLeastOnce(
+        Iterable<MutationGroup> mutationGroups, TransactionOption... options)
+        throws SpannerException {
+      return get().batchWriteAtLeastOnce(mutationGroups, options);
+    }
+
+    @Override
+    public ReadContext singleUse() {
+      return get().singleUse();
+    }
+
+    @Override
+    public ReadContext singleUse(TimestampBound bound) {
+      return get().singleUse(bound);
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction() {
+      return get().singleUseReadOnlyTransaction();
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction(TimestampBound bound) {
+      return get().singleUseReadOnlyTransaction(bound);
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction() {
+      return get().readOnlyTransaction();
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction(TimestampBound bound) {
+      return get().readOnlyTransaction(bound);
+    }
+
+    @Override
+    public TransactionRunner readWriteTransaction(TransactionOption... options) {
+      return get().readWriteTransaction(options);
+    }
+
+    @Override
+    public TransactionManager transactionManager(TransactionOption... options) {
+      return get().transactionManager(options);
+    }
+
+    @Override
+    public AsyncRunner runAsync(TransactionOption... options) {
+      return get().runAsync(options);
+    }
+
+    @Override
+    public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
+      return get().transactionManagerAsync(options);
+    }
+
+    @Override
+    public long executePartitionedUpdate(Statement stmt, UpdateOption... options) {
+      return get().executePartitionedUpdate(stmt, options);
     }
   }
 
@@ -1194,27 +1288,109 @@ class SessionPool {
       if (multiplexedSessionFuture == null) {
         synchronized (lock) {
           if (multiplexedSessionFuture == null) {
-            try {
-              // Creating a new reference where the request's span state can be stored.
-              SessionImpl sessionImpl =
-                  new SessionImpl(
-                      sessionClient.getSpanner(), this.multiplexedSessionSettableApiFuture.get());
-              MultiplexedSession multiplexedSession = new MultiplexedSession(sessionImpl);
-              SettableFuture<MultiplexedSession> settableFuture = SettableFuture.create();
-              settableFuture.set(multiplexedSession);
-              MultiplexedSessionFuture multiplexedSessionFuture =
-                  new MultiplexedSessionFuture(settableFuture, span);
-              this.multiplexedSessionFuture = multiplexedSessionFuture;
-              return multiplexedSessionFuture;
-            } catch (InterruptedException interruptedException) {
-              throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
-            } catch (ExecutionException executionException) {
-              throw SpannerExceptionFactory.asSpannerException(executionException.getCause());
-            }
+            // Creating a new reference where the request's span state can be stored.
+            MultiplexedSessionFuture multiplexedSessionFuture =
+                new MultiplexedSessionFuture(multiplexedSessionSettableApiFuture, span);
+            this.multiplexedSessionFuture = multiplexedSessionFuture;
+            return multiplexedSessionFuture;
           }
         }
       }
       return multiplexedSessionFuture;
+    }
+
+    @Override
+    public Dialect getDialect() {
+      return get().getDialect();
+    }
+
+    @Override
+    public String getDatabaseRole() {
+      return get().getDatabaseRole();
+    }
+
+    @Override
+    public Timestamp write(Iterable<Mutation> mutations) throws SpannerException {
+      return get().write(mutations);
+    }
+
+    @Override
+    public CommitResponse writeWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      return get().writeWithOptions(mutations, options);
+    }
+
+    @Override
+    public Timestamp writeAtLeastOnce(Iterable<Mutation> mutations) throws SpannerException {
+      return get().writeAtLeastOnce(mutations);
+    }
+
+    @Override
+    public CommitResponse writeAtLeastOnceWithOptions(
+        Iterable<Mutation> mutations, TransactionOption... options) throws SpannerException {
+      return get().writeAtLeastOnceWithOptions(mutations, options);
+    }
+
+    @Override
+    public ServerStream<BatchWriteResponse> batchWriteAtLeastOnce(
+        Iterable<MutationGroup> mutationGroups, TransactionOption... options)
+        throws SpannerException {
+      return get().batchWriteAtLeastOnce(mutationGroups, options);
+    }
+
+    @Override
+    public ReadContext singleUse() {
+      return get().singleUse();
+    }
+
+    @Override
+    public ReadContext singleUse(TimestampBound bound) {
+      return get().singleUse(bound);
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction() {
+      return get().singleUseReadOnlyTransaction();
+    }
+
+    @Override
+    public ReadOnlyTransaction singleUseReadOnlyTransaction(TimestampBound bound) {
+      return get().singleUseReadOnlyTransaction(bound);
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction() {
+      return get().readOnlyTransaction();
+    }
+
+    @Override
+    public ReadOnlyTransaction readOnlyTransaction(TimestampBound bound) {
+      return get().readOnlyTransaction(bound);
+    }
+
+    @Override
+    public TransactionRunner readWriteTransaction(TransactionOption... options) {
+      return get().readWriteTransaction(options);
+    }
+
+    @Override
+    public TransactionManager transactionManager(TransactionOption... options) {
+      return get().transactionManager(options);
+    }
+
+    @Override
+    public AsyncRunner runAsync(TransactionOption... options) {
+      return get().runAsync(options);
+    }
+
+    @Override
+    public AsyncTransactionManager transactionManagerAsync(TransactionOption... options) {
+      return get().transactionManagerAsync(options);
+    }
+
+    @Override
+    public long executePartitionedUpdate(Statement stmt, UpdateOption... options) {
+      return get().executePartitionedUpdate(stmt, options);
     }
   }
 
@@ -1496,15 +1672,15 @@ class SessionPool {
     }
   }
 
-  class MultiplexedSessionFuture extends SimpleForwardingListenableFuture<MultiplexedSession>
-      implements SessionFuture {
+  class MultiplexedSessionFuture implements SessionFuture {
 
     private ISpan span;
+    private SettableApiFuture<SessionReference> settableApiFuture;
 
     @VisibleForTesting
-    MultiplexedSessionFuture(ListenableFuture<MultiplexedSession> delegate, ISpan span) {
-      super(delegate);
+    MultiplexedSessionFuture(SettableApiFuture<SessionReference> settableApiFuture, ISpan span) {
       this.span = span;
+      this.settableApiFuture = settableApiFuture;
     }
 
     @Override
@@ -1710,7 +1886,9 @@ class SessionPool {
     @Override
     public MultiplexedSession get() {
       try {
-        MultiplexedSession multiplexedSession = super.get();
+        SessionImpl sessionImpl =
+            new SessionImpl(sessionClient.getSpanner(), settableApiFuture.get());
+        MultiplexedSession multiplexedSession = new MultiplexedSession(sessionImpl);
         if (multiplexedSession != null) {
           multiplexedSession.markBusy(span);
           span.addAnnotation("Using Session", "sessionId", multiplexedSession.getName());
@@ -3471,7 +3649,7 @@ class SessionPool {
         logger.log(Level.FINE, String.format("Creating multiplexed sessions"));
         try {
           multiplexedSessionBeingCreated = true;
-          sessionClient.createMultiplexedSession(sessionConsumer);
+          sessionClient.asyncCreateMultiplexedSession(sessionConsumer);
         } catch (Throwable ignore) {
           // such an exception will never be thrown. the exception will be passed onto the consumer.
         }
