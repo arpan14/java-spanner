@@ -159,7 +159,15 @@
   </build>
 
   <dependencies>
-
+    <dependency>
+      <groupId>io.opencensus</groupId>
+      <artifactId>opencensus-impl</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.opencensus</groupId>
+      <artifactId>opencensus-exporter-stats-stackdriver</artifactId>
+    </dependency>
     <dependency>
       <groupId>com.google.cloud</groupId>
       <artifactId>grpc-gcp</artifactId>
