@@ -73,8 +73,8 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
   public static class BenchmarkState {
 
     // TODO(developer): Add your values here for PROJECT_ID, INSTANCE_ID, DATABASE_ID
-    private static final String INSTANCE_ID = "";
-    private static final String DATABASE_ID = "";
+    private static final String INSTANCE_ID = "arpanmishra-dev-span";
+    private static final String DATABASE_ID = "anonymous-sessions";
     private static final String SERVER_URL = "https://staging-wrenchworks.sandbox.googleapis.com";
     private Spanner spanner;
     private DatabaseClientImpl client;
