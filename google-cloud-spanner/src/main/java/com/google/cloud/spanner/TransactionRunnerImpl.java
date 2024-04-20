@@ -56,7 +56,6 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -199,8 +198,6 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
     private CommitResponse commitResponse;
     private final Clock clock;
 
-    private Long channelHint;
-
     private TransactionContextImpl(Builder builder) {
       super(builder);
       this.transactionId = builder.transactionId;
@@ -208,7 +205,6 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
       this.options = builder.options;
       this.finishedAsyncOperations.set(null);
       this.clock = builder.clock;
-      this.channelHint = ThreadLocalRandom.current().nextLong(Long.MAX_VALUE);
     }
 
     @Override
@@ -561,11 +557,6 @@ class TransactionRunnerImpl implements SessionTransaction, TransactionRunner {
       }
       // There is already a transactionId available. Include that id as the transaction to use.
       return TransactionSelector.newBuilder().setId(transactionId).build();
-    }
-
-    @Override
-    long getTransactionChannelHint() {
-      return channelHint;
     }
 
     @Override
