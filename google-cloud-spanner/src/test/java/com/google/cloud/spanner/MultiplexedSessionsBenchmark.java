@@ -172,19 +172,11 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
   private List<java.time.Duration> runBenchmarksForSingleUseQueries(
       final BenchmarkState server, int numberOfOperations) {
     List<Duration> results = new ArrayList<>(numberOfOperations);
-    // Execute one query to make sure everything has been warmed up.
-    executeWarmup(server);
 
     for (int i = 0; i < numberOfOperations; i++) {
       results.add(executeSingleUseQuery(server));
     }
     return results;
-  }
-
-  private void executeWarmup(final BenchmarkState server) {
-    for (int i = 0; i < WARMUP_REQUEST_COUNT; i++) {
-      executeSingleUseQuery(server);
-    }
   }
 
   private java.time.Duration executeSingleUseQuery(final BenchmarkState server) {

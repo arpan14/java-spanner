@@ -171,19 +171,11 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
   private List<java.time.Duration> runBenchmarksForSingleUseQueries(
       final BenchmarkState server, int numberOfOperations) {
     List<Duration> results = new ArrayList<>(numberOfOperations);
-    // Execute one query to make sure everything has been warmed up.
-    executeWarmup(server);
 
     for (int i = 0; i < numberOfOperations; i++) {
       results.add(executeSingleUseQuery(server));
     }
     return results;
-  }
-
-  private void executeWarmup(final BenchmarkState server) {
-    for (int i = 0; i < WARMUP_REQUEST_COUNT; i++) {
-      executeSingleUseQuery(server);
-    }
   }
 
   private java.time.Duration executeSingleUseQuery(final BenchmarkState server) {
@@ -195,30 +187,6 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
         assertNotNull(rs.getValue(0));
       }
     }
-    return watch.elapsed();
-  }
-
-  private List<java.time.Duration> runBenchmarkForUpdates(
-      final BenchmarkState server, int numberOfOperations) {
-    List<Duration> results = new ArrayList<>(numberOfOperations);
-    // Execute one query to make sure everything has been warmed up.
-    executeWarmup(server);
-
-    // Execute one update to make sure everything has been warmed up.
-    executeUpdate(server);
-
-    for (int i = 0; i < numberOfOperations; i++) {
-      results.add(executeUpdate(server));
-    }
-    return results;
-  }
-
-  private Duration executeUpdate(final BenchmarkState server) {
-    Stopwatch watch = Stopwatch.createStarted();
-
-    TransactionRunner runner = server.client.readWriteTransaction();
-    runner.run(transaction -> transaction.executeUpdate(getRandomisedUpdateStatement()));
-
     return watch.elapsed();
   }
 
