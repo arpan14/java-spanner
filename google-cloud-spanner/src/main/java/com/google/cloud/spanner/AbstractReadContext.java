@@ -750,7 +750,7 @@ abstract class AbstractReadContext
             if (selector != null) {
               request.setTransaction(selector);
             }
-            span.addAnnotation("Starting Query");
+            span.addAnnotation("Starting ExecuteQuery RPC");
             SpannerRpc.StreamingCall call =
                 rpc.executeQuery(
                     request.build(),
@@ -917,7 +917,7 @@ abstract class AbstractReadContext
               builder.setTransaction(selector);
             }
             builder.setRequestOptions(buildRequestOptions(readOptions));
-            span.addAnnotation("Starting Read");
+            span.addAnnotation("Starting Read RPC");
             SpannerRpc.StreamingCall call =
                 rpc.read(
                     builder.build(),

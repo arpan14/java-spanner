@@ -109,7 +109,7 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
               .setResource(
                   Resource.create(
                       Attributes.of(
-                          ResourceAttributes.SERVICE_NAME, "Java-MultiplexedSession-Benchmark")))
+                          ResourceAttributes.SERVICE_NAME, this.getClass().getSimpleName())))
               .setSampler(Sampler.alwaysOn())
               .build();
       MetricExporter cloudMonitoringExporter =
