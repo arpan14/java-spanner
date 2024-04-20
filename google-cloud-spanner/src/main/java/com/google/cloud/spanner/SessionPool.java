@@ -1790,6 +1790,7 @@ class SessionPool {
           boolean created = false;
           synchronized (this) {
             if (multiplexedSession == null) {
+              span.addAnnotation("Multiplexed session is not yet initialized");
               SessionImpl sessionImpl =
                   new SessionImpl(
                       sessionClient.getSpanner(), currentMultiplexedSessionReference.get().get());
@@ -1801,9 +1802,11 @@ class SessionPool {
             }
           }
           if (created) {
+            span.addAnnotation("Emitting session use metrics");
             synchronized (lock) {
               incrementNumSessionsInUse(true);
             }
+            span.addAnnotation("Emitted session use metrics");
           }
         }
         return multiplexedSession;
