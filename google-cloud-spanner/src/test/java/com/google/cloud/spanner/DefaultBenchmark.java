@@ -82,7 +82,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Warmup(iterations = 0)
 public class DefaultBenchmark extends AbstractLatencyBenchmark {
 
-  @State(Scope.Thread)
+  @State(Scope.Benchmark)
   public static class BenchmarkState {
 
     // TODO(developer): Add your values here for PROJECT_ID, INSTANCE_ID, DATABASE_ID
@@ -99,7 +99,7 @@ public class DefaultBenchmark extends AbstractLatencyBenchmark {
     @Param({"400"})
     int maxSessions;
 
-    @Setup(Level.Iteration)
+    @Setup(Level.Invocation)
     public void setup() throws Exception {
       // setup open telemetry metrics and traces
       SpanExporter traceExporter = TraceExporter.createWithDefaultConfiguration();
