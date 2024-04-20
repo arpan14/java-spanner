@@ -21,10 +21,24 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
+import com.google.cloud.opentelemetry.trace.TraceExporter;
 import com.google.common.base.Stopwatch;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.export.MetricExporter;
+import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.resources.Resource;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
+import io.opentelemetry.semconv.resource.attributes.ResourceAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -87,10 +101,33 @@ public class MultiplexedSessionsBenchmark extends AbstractLatencyBenchmark {
 
     @Setup(Level.Iteration)
     public void setup() throws Exception {
+      // setup open telemetry metrics and traces
+      SpanExporter traceExporter = TraceExporter.createWithDefaultConfiguration();
+      SdkTracerProvider tracerProvider =
+          SdkTracerProvider.builder()
+              .addSpanProcessor(BatchSpanProcessor.builder(traceExporter).build())
+              .setResource(
+                  Resource.create(
+                      Attributes.of(
+                          ResourceAttributes.SERVICE_NAME, "Java-MultiplexedSession-Benchmark")))
+              .setSampler(Sampler.alwaysOn())
+              .build();
+      MetricExporter cloudMonitoringExporter =
+          GoogleCloudMetricExporter.createWithDefaultConfiguration();
+      SdkMeterProvider sdkMeterProvider =
+          SdkMeterProvider.builder()
+              .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
+              .build();
+      OpenTelemetry openTelemetry =
+          OpenTelemetrySdk.builder()
+              .setMeterProvider(sdkMeterProvider)
+              .setTracerProvider(tracerProvider)
+              .build();
       SpannerOptions.enableOpenTelemetryMetrics();
       SpannerOptions.enableOpenTelemetryTraces();
       SpannerOptions options =
           SpannerOptions.newBuilder()
+              .setOpenTelemetry(openTelemetry)
               .setSessionPoolOption(
                   SessionPoolOptions.newBuilder()
                       .setMinSessions(minSessions)
