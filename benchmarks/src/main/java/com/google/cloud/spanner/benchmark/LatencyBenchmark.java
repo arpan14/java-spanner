@@ -72,16 +72,8 @@ public class LatencyBenchmark {
         "transaction",
         true,
         "The type of transaction to execute. Must be either READ_ONLY or READ_WRITE. Defaults to READ_ONLY.");
-    options.addOption(
-        "m",
-        "multiplexed",
-        true,
-        "Use multiplexed sessions. Defaults to false.");
-    options.addOption(
-        "w",
-        "wait",
-        true,
-        "Wait time in millis. Defaults to zero.");
+    options.addOption("m", "multiplexed", true, "Use multiplexed sessions. Defaults to false.");
+    options.addOption("w", "wait", true, "Wait time in millis. Defaults to zero.");
     options.addOption("name", true, "Name of this test run");
     CommandLineParser parser = new DefaultParser();
     return parser.parse(options, args);

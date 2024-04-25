@@ -16,6 +16,8 @@
 
 package com.google.cloud.spanner.benchmark;
 
+import com.google.cloud.opentelemetry.metric.GoogleCloudMetricExporter;
+import com.google.cloud.opentelemetry.trace.TraceExporter;
 import com.google.cloud.spanner.DatabaseClient;
 import com.google.cloud.spanner.DatabaseId;
 import com.google.cloud.spanner.ResultSet;
@@ -26,6 +28,15 @@ import com.google.cloud.spanner.SpannerExceptionFactory;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Statement;
 import com.google.common.base.Stopwatch;
+import io.opencensus.resource.Resource;
+import io.opencensus.trace.export.SpanExporter;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.export.MetricExporter;
+import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,12 +61,33 @@ public class JavaClientRunner extends AbstractRunner {
       int numOperations,
       int waitMillis,
       boolean useMultiplexedSession) {
+    // setup open telemetry metrics and traces
+    // setup open telemetry metrics and traces
+    SpanExporter traceExporter = TraceExporter.createWithDefaultConfiguration();
+    SdkTracerProvider tracerProvider =
+        SdkTracerProvider.builder()
+            .addSpanProcessor(BatchSpanProcessor.builder(traceExporter).build())
+            .setResource(
+                Resource.create(
+                    Attributes.of(
+                        ResourceAttributes.SERVICE_NAME, "Java-MultiplexedSession-Benchmark")))
+            .setSampler(Sampler.alwaysOn())
+            .build();
+    MetricExporter cloudMonitoringExporter =
+        GoogleCloudMetricExporter.createWithDefaultConfiguration();
+    SdkMeterProvider sdkMeterProvider =
+        SdkMeterProvider.builder()
+            .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
+            .build();
     SessionPoolOptions sessionPoolOptions =
         SessionPoolOptionsHelper.setUseMultiplexedSession(
                 SessionPoolOptions.newBuilder(), useMultiplexedSession)
             .build();
+    SpannerOptions.enableOpenTelemetryMetrics();
+    SpannerOptions.enableOpenTelemetryTraces();
     SpannerOptions options =
         SpannerOptions.newBuilder()
+            // .setOpenTelemetry(openTelemetry)
             .setProjectId(databaseId.getInstanceId().getProject())
             .setSessionPoolOption(sessionPoolOptions)
             .setHost(SERVER_URL)
