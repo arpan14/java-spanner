@@ -4,5 +4,5 @@ The benchmark application includes PGAdapter as a dependency and automatically s
 an in-process service.
 
 ```shell
-mvn clean compile exec:java -Dexec.args="--clients=16 --operations=1000"
+mvn clean compile exec:java -Dexec.args="--clients=1 --operations=1000 --multiplexed=true"
 ```

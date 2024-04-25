@@ -28,14 +28,19 @@ import com.google.cloud.spanner.SpannerExceptionFactory;
 import com.google.cloud.spanner.SpannerOptions;
 import com.google.cloud.spanner.Statement;
 import com.google.common.base.Stopwatch;
-import io.opencensus.resource.Resource;
-import io.opencensus.trace.export.SpanExporter;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.Meter;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
 import io.opentelemetry.sdk.metrics.export.MetricExporter;
 import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
+import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -70,7 +75,8 @@ public class JavaClientRunner extends AbstractRunner {
             .setResource(
                 Resource.create(
                     Attributes.of(
-                        ResourceAttributes.SERVICE_NAME, "Java-MultiplexedSession-Benchmark")))
+                        AttributeKey.stringKey("service.name"),
+                        "Java-MultiplexedSession-Benchmark")))
             .setSampler(Sampler.alwaysOn())
             .build();
     MetricExporter cloudMonitoringExporter =
@@ -78,6 +84,11 @@ public class JavaClientRunner extends AbstractRunner {
     SdkMeterProvider sdkMeterProvider =
         SdkMeterProvider.builder()
             .registerMetricReader(PeriodicMetricReader.create(cloudMonitoringExporter))
+            .build();
+    OpenTelemetry openTelemetry =
+        OpenTelemetrySdk.builder()
+            .setMeterProvider(sdkMeterProvider)
+            .setTracerProvider(tracerProvider)
             .build();
     SessionPoolOptions sessionPoolOptions =
         SessionPoolOptionsHelper.setUseMultiplexedSession(
@@ -87,10 +98,19 @@ public class JavaClientRunner extends AbstractRunner {
     SpannerOptions.enableOpenTelemetryTraces();
     SpannerOptions options =
         SpannerOptions.newBuilder()
-            // .setOpenTelemetry(openTelemetry)
+            .setOpenTelemetry(openTelemetry)
             .setProjectId(databaseId.getInstanceId().getProject())
             .setSessionPoolOption(sessionPoolOptions)
             .setHost(SERVER_URL)
+            .build();
+    // Register query stats metric.
+    // This should be done once before start recording the data.
+    Meter meter = openTelemetry.getMeter("cloud.google.com/java");
+    DoubleHistogram endToEndLatencies =
+        meter
+            .histogramBuilder("spanner/end_end_elapsed")
+            .setDescription("The execution of end to end latency")
+            .setUnit("ms")
             .build();
     try (Spanner spanner = options.getService()) {
       DatabaseClient databaseClient = spanner.getDatabaseClient(databaseId);
@@ -100,7 +120,13 @@ public class JavaClientRunner extends AbstractRunner {
       for (int client = 0; client < numClients; client++) {
         results.add(
             service.submit(
-                () -> runBenchmark(databaseClient, transactionType, numOperations, waitMillis)));
+                () ->
+                    runBenchmark(
+                        databaseClient,
+                        transactionType,
+                        numOperations,
+                        waitMillis,
+                        endToEndLatencies)));
       }
       return collectResults(service, results, numClients, numOperations);
     } catch (Throwable t) {
@@ -112,15 +138,19 @@ public class JavaClientRunner extends AbstractRunner {
       DatabaseClient databaseClient,
       TransactionType transactionType,
       int numOperations,
-      int waitMillis) {
+      int waitMillis,
+      DoubleHistogram endToEndLatencies) {
     List<Duration> results = new ArrayList<>(numOperations);
     // Execute one query to make sure everything has been warmed up.
-    executeTransaction(databaseClient, transactionType);
+    executeTransaction(
+        databaseClient, transactionType, endToEndLatencies);
 
     for (int i = 0; i < numOperations; i++) {
       try {
         randomWait(waitMillis);
-        results.add(executeTransaction(databaseClient, transactionType));
+        results.add(
+            executeTransaction(
+                databaseClient, transactionType, endToEndLatencies));
         incOperations();
       } catch (InterruptedException interruptedException) {
         throw SpannerExceptionFactory.propagateInterrupt(interruptedException);
@@ -129,7 +159,10 @@ public class JavaClientRunner extends AbstractRunner {
     return results;
   }
 
-  private Duration executeTransaction(DatabaseClient client, TransactionType transactionType) {
+  private Duration executeTransaction(
+      DatabaseClient client,
+      TransactionType transactionType,
+      DoubleHistogram endToEndLatencies) {
     Stopwatch watch = Stopwatch.createStarted();
     switch (transactionType) {
       case READ_ONLY:
@@ -139,7 +172,9 @@ public class JavaClientRunner extends AbstractRunner {
         executeReadWriteTransaction(client);
         break;
     }
-    return watch.elapsed();
+    Duration elapsedTime = watch.elapsed();
+    endToEndLatencies.record(elapsedTime.toMillis());
+    return elapsedTime;
   }
 
   private void executeReadOnlyTransaction(DatabaseClient client) {
