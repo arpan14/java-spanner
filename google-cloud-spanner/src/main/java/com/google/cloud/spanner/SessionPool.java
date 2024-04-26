@@ -2349,8 +2349,13 @@ class SessionPool {
                           + acquireSessionTimeout.toMillis()
                           + "ms for acquiring session. To mitigate error SessionPoolOptions#setAcquireSessionTimeout(Duration) to set a higher timeout"
                           + " or increase the number of sessions in the session pool.");
-              waiter.setException(exception);
-              throw exception;
+              if (waiter.setException(exception)) {
+                // Only throw the exception if setting it on the waiter was successful. The
+                // waiter.setException(..) method returns false if some other thread in the meantime
+                // called waiter.set(..), which means that a session became available between the
+                // time that the TimeoutException was thrown and now.
+                throw exception;
+              }
             }
             return null;
           } catch (ExecutionException e) {
@@ -2644,28 +2649,26 @@ class SessionPool {
     void maintainMultiplexedSession(Instant currentTime) {
       try {
         if (options.getUseMultiplexedSession()) {
-          synchronized (lock) {
-            if (currentMultiplexedSessionReference.get().isDone()) {
-              SessionReference sessionReference = getMultiplexedSessionInstance();
-              if (sessionReference != null
-                  && isMultiplexedSessionStale(sessionReference, currentTime)) {
-                final Instant minExecutionTime =
-                    multiplexedSessionReplacementAttemptTime.plus(
-                        multiplexedSessionCreationRetryDelay);
-                if (currentTime.isBefore(minExecutionTime)) {
-                  return;
-                }
-                /*
-                 This will attempt to create a new multiplexed session. if successfully created then
-                 the existing session will be replaced. Note that there maybe active transactions
-                 running on the stale session. Hence, it is important that we only replace the reference
-                 and not invoke a DeleteSession RPC.
-                */
-                maybeCreateMultiplexedSession(multiplexedMaintainerConsumer);
-
-                // update this only after we have attempted to replace the multiplexed session
-                multiplexedSessionReplacementAttemptTime = currentTime;
+          if (currentMultiplexedSessionReference.get().isDone()) {
+            SessionReference sessionReference = getMultiplexedSessionInstance();
+            if (sessionReference != null
+                && isMultiplexedSessionStale(sessionReference, currentTime)) {
+              final Instant minExecutionTime =
+                  multiplexedSessionReplacementAttemptTime.plus(
+                      multiplexedSessionCreationRetryDelay);
+              if (currentTime.isBefore(minExecutionTime)) {
+                return;
               }
+              /*
+               This will attempt to create a new multiplexed session. if successfully created then
+               the existing session will be replaced. Note that there maybe active transactions
+               running on the stale session. Hence, it is important that we only replace the reference
+               and not invoke a DeleteSession RPC.
+              */
+              maybeCreateMultiplexedSession(multiplexedMaintainerConsumer);
+
+              // update this only after we have attempted to replace the multiplexed session
+              multiplexedSessionReplacementAttemptTime = currentTime;
             }
           }
         }
@@ -3040,6 +3043,13 @@ class SessionPool {
   int getNumberOfSessionsBeingCreated() {
     synchronized (lock) {
       return numSessionsBeingCreated;
+    }
+  }
+
+  @VisibleForTesting
+  int getTotalSessionsPlusNumSessionsBeingCreated() {
+    synchronized (lock) {
+      return numSessionsBeingCreated + allSessions.size();
     }
   }
 
