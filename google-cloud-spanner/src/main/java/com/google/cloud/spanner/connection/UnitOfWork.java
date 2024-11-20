@@ -31,6 +31,7 @@ import com.google.cloud.spanner.SpannerException;
 import com.google.cloud.spanner.TransactionContext;
 import com.google.cloud.spanner.connection.AbstractStatementParser.ParsedStatement;
 import com.google.spanner.v1.ResultSetStats;
+import io.opentelemetry.api.trace.Span;
 import java.util.concurrent.ExecutionException;
 import javax.annotation.Nonnull;
 
@@ -65,6 +66,24 @@ interface UnitOfWork {
     }
   }
 
+  /**
+   * Callback for end-of-transaction methods. This is used to commit or rollback connection state
+   * after an async commit/rollback of a database transaction.
+   */
+  interface EndTransactionCallback {
+    /**
+     * This method will be called if the end-of-transaction method (commit or rollback) finished
+     * successfully, but before the {@link ApiFuture} that is returned by the method is done.
+     */
+    void onSuccess();
+
+    /**
+     * This method will be called if the end-of-transaction method (commit or rollback) failed, but
+     * before the {@link ApiFuture} that is returned by the method is done.
+     */
+    void onFailure();
+  }
+
   /** Cancel the currently running statement (if any and the statement may be cancelled). */
   void cancel();
 
@@ -77,15 +96,22 @@ interface UnitOfWork {
   /** @return <code>true</code> if this unit of work is still active. */
   boolean isActive();
 
+  /** @return the {@link Span} that is used by this {@link UnitOfWork}. */
+  Span getSpan();
+
+  /** Returns true if this transaction can only be used for a single statement. */
+  boolean isSingleUse();
+
   /**
    * Commits the changes in this unit of work to the database. For read-only transactions, this only
    * closes the {@link ReadContext}. This method will throw a {@link SpannerException} if called for
    * a {@link Type#BATCH}.
    *
    * @param callType Indicates whether the top-level call is a sync or async call.
+   * @param callback Callback that should be called when the commit succeeded or failed.
    * @return An {@link ApiFuture} that is done when the commit has finished.
    */
-  ApiFuture<Void> commitAsync(CallType callType);
+  ApiFuture<Void> commitAsync(@Nonnull CallType callType, @Nonnull EndTransactionCallback callback);
 
   /**
    * Rollbacks any changes in this unit of work. For read-only transactions, this only closes the
@@ -93,9 +119,11 @@ interface UnitOfWork {
    * Type#BATCH}.
    *
    * @param callType Indicates whether the top-level call is a sync or async call.
+   * @param callback Callback that should be called when the rollback succeeded or failed.
    * @return An {@link ApiFuture} that is done when the rollback has finished.
    */
-  ApiFuture<Void> rollbackAsync(CallType callType);
+  ApiFuture<Void> rollbackAsync(
+      @Nonnull CallType callType, @Nonnull EndTransactionCallback callback);
 
   /** @see Connection#savepoint(String) */
   void savepoint(@Nonnull String name, @Nonnull Dialect dialect);

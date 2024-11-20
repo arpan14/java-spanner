@@ -17,6 +17,7 @@
 package com.google.cloud.spanner.admin.database.v1;
 
 import static com.google.cloud.spanner.admin.database.v1.DatabaseAdminClient.ListBackupOperationsPagedResponse;
+import static com.google.cloud.spanner.admin.database.v1.DatabaseAdminClient.ListBackupSchedulesPagedResponse;
 import static com.google.cloud.spanner.admin.database.v1.DatabaseAdminClient.ListBackupsPagedResponse;
 import static com.google.cloud.spanner.admin.database.v1.DatabaseAdminClient.ListDatabaseOperationsPagedResponse;
 import static com.google.cloud.spanner.admin.database.v1.DatabaseAdminClient.ListDatabaseRolesPagedResponse;
@@ -44,21 +45,27 @@ import com.google.iam.v1.TestIamPermissionsResponse;
 import com.google.longrunning.Operation;
 import com.google.protobuf.Empty;
 import com.google.spanner.admin.database.v1.Backup;
+import com.google.spanner.admin.database.v1.BackupSchedule;
 import com.google.spanner.admin.database.v1.CopyBackupMetadata;
 import com.google.spanner.admin.database.v1.CopyBackupRequest;
 import com.google.spanner.admin.database.v1.CreateBackupMetadata;
 import com.google.spanner.admin.database.v1.CreateBackupRequest;
+import com.google.spanner.admin.database.v1.CreateBackupScheduleRequest;
 import com.google.spanner.admin.database.v1.CreateDatabaseMetadata;
 import com.google.spanner.admin.database.v1.CreateDatabaseRequest;
 import com.google.spanner.admin.database.v1.Database;
 import com.google.spanner.admin.database.v1.DeleteBackupRequest;
+import com.google.spanner.admin.database.v1.DeleteBackupScheduleRequest;
 import com.google.spanner.admin.database.v1.DropDatabaseRequest;
 import com.google.spanner.admin.database.v1.GetBackupRequest;
+import com.google.spanner.admin.database.v1.GetBackupScheduleRequest;
 import com.google.spanner.admin.database.v1.GetDatabaseDdlRequest;
 import com.google.spanner.admin.database.v1.GetDatabaseDdlResponse;
 import com.google.spanner.admin.database.v1.GetDatabaseRequest;
 import com.google.spanner.admin.database.v1.ListBackupOperationsRequest;
 import com.google.spanner.admin.database.v1.ListBackupOperationsResponse;
+import com.google.spanner.admin.database.v1.ListBackupSchedulesRequest;
+import com.google.spanner.admin.database.v1.ListBackupSchedulesResponse;
 import com.google.spanner.admin.database.v1.ListBackupsRequest;
 import com.google.spanner.admin.database.v1.ListBackupsResponse;
 import com.google.spanner.admin.database.v1.ListDatabaseOperationsRequest;
@@ -70,6 +77,7 @@ import com.google.spanner.admin.database.v1.ListDatabasesResponse;
 import com.google.spanner.admin.database.v1.RestoreDatabaseMetadata;
 import com.google.spanner.admin.database.v1.RestoreDatabaseRequest;
 import com.google.spanner.admin.database.v1.UpdateBackupRequest;
+import com.google.spanner.admin.database.v1.UpdateBackupScheduleRequest;
 import com.google.spanner.admin.database.v1.UpdateDatabaseDdlMetadata;
 import com.google.spanner.admin.database.v1.UpdateDatabaseDdlRequest;
 import com.google.spanner.admin.database.v1.UpdateDatabaseMetadata;
@@ -93,7 +101,9 @@ import javax.annotation.Generated;
  * <p>The builder of this class is recursive, so contained classes are themselves builders. When
  * build() is called, the tree of builders is called to create the complete settings object.
  *
- * <p>For example, to set the total timeout of getDatabase to 30 seconds:
+ * <p>For example, to set the
+ * [RetrySettings](https://cloud.google.com/java/docs/reference/gax/latest/com.google.api.gax.retrying.RetrySettings)
+ * of getDatabase:
  *
  * <pre>{@code
  * // This snippet has been automatically generated and should be regarded as a code template only.
@@ -109,9 +119,45 @@ import javax.annotation.Generated;
  *             .getDatabaseSettings()
  *             .getRetrySettings()
  *             .toBuilder()
- *             .setTotalTimeout(Duration.ofSeconds(30))
+ *             .setInitialRetryDelayDuration(Duration.ofSeconds(1))
+ *             .setInitialRpcTimeoutDuration(Duration.ofSeconds(5))
+ *             .setMaxAttempts(5)
+ *             .setMaxRetryDelayDuration(Duration.ofSeconds(30))
+ *             .setMaxRpcTimeoutDuration(Duration.ofSeconds(60))
+ *             .setRetryDelayMultiplier(1.3)
+ *             .setRpcTimeoutMultiplier(1.5)
+ *             .setTotalTimeoutDuration(Duration.ofSeconds(300))
  *             .build());
  * DatabaseAdminSettings databaseAdminSettings = databaseAdminSettingsBuilder.build();
+ * }</pre>
+ *
+ * Please refer to the [Client Side Retry
+ * Guide](https://github.com/googleapis/google-cloud-java/blob/main/docs/client_retries.md) for
+ * additional support in setting retries.
+ *
+ * <p>To configure the RetrySettings of a Long Running Operation method, create an
+ * OperationTimedPollAlgorithm object and update the RPC's polling algorithm. For example, to
+ * configure the RetrySettings for createDatabase:
+ *
+ * <pre>{@code
+ * // This snippet has been automatically generated and should be regarded as a code template only.
+ * // It will require modifications to work:
+ * // - It may require correct/in-range values for request initialization.
+ * // - It may require specifying regional endpoints when creating the service client as shown in
+ * // https://cloud.google.com/java/docs/setup#configure_endpoints_for_the_client_library
+ * DatabaseAdminSettings.Builder databaseAdminSettingsBuilder = DatabaseAdminSettings.newBuilder();
+ * TimedRetryAlgorithm timedRetryAlgorithm =
+ *     OperationalTimedPollAlgorithm.create(
+ *         RetrySettings.newBuilder()
+ *             .setInitialRetryDelayDuration(Duration.ofMillis(500))
+ *             .setRetryDelayMultiplier(1.5)
+ *             .setMaxRetryDelay(Duration.ofMillis(5000))
+ *             .setTotalTimeoutDuration(Duration.ofHours(24))
+ *             .build());
+ * databaseAdminSettingsBuilder
+ *     .createClusterOperationSettings()
+ *     .setPollingAlgorithm(timedRetryAlgorithm)
+ *     .build();
  * }</pre>
  */
 @Generated("by gapic-generator-java")
@@ -264,6 +310,35 @@ public class DatabaseAdminSettings extends ClientSettings<DatabaseAdminSettings>
           ListDatabaseRolesRequest, ListDatabaseRolesResponse, ListDatabaseRolesPagedResponse>
       listDatabaseRolesSettings() {
     return ((DatabaseAdminStubSettings) getStubSettings()).listDatabaseRolesSettings();
+  }
+
+  /** Returns the object with the settings used for calls to createBackupSchedule. */
+  public UnaryCallSettings<CreateBackupScheduleRequest, BackupSchedule>
+      createBackupScheduleSettings() {
+    return ((DatabaseAdminStubSettings) getStubSettings()).createBackupScheduleSettings();
+  }
+
+  /** Returns the object with the settings used for calls to getBackupSchedule. */
+  public UnaryCallSettings<GetBackupScheduleRequest, BackupSchedule> getBackupScheduleSettings() {
+    return ((DatabaseAdminStubSettings) getStubSettings()).getBackupScheduleSettings();
+  }
+
+  /** Returns the object with the settings used for calls to updateBackupSchedule. */
+  public UnaryCallSettings<UpdateBackupScheduleRequest, BackupSchedule>
+      updateBackupScheduleSettings() {
+    return ((DatabaseAdminStubSettings) getStubSettings()).updateBackupScheduleSettings();
+  }
+
+  /** Returns the object with the settings used for calls to deleteBackupSchedule. */
+  public UnaryCallSettings<DeleteBackupScheduleRequest, Empty> deleteBackupScheduleSettings() {
+    return ((DatabaseAdminStubSettings) getStubSettings()).deleteBackupScheduleSettings();
+  }
+
+  /** Returns the object with the settings used for calls to listBackupSchedules. */
+  public PagedCallSettings<
+          ListBackupSchedulesRequest, ListBackupSchedulesResponse, ListBackupSchedulesPagedResponse>
+      listBackupSchedulesSettings() {
+    return ((DatabaseAdminStubSettings) getStubSettings()).listBackupSchedulesSettings();
   }
 
   public static final DatabaseAdminSettings create(DatabaseAdminStubSettings stub)
@@ -529,6 +604,39 @@ public class DatabaseAdminSettings extends ClientSettings<DatabaseAdminSettings>
             ListDatabaseRolesRequest, ListDatabaseRolesResponse, ListDatabaseRolesPagedResponse>
         listDatabaseRolesSettings() {
       return getStubSettingsBuilder().listDatabaseRolesSettings();
+    }
+
+    /** Returns the builder for the settings used for calls to createBackupSchedule. */
+    public UnaryCallSettings.Builder<CreateBackupScheduleRequest, BackupSchedule>
+        createBackupScheduleSettings() {
+      return getStubSettingsBuilder().createBackupScheduleSettings();
+    }
+
+    /** Returns the builder for the settings used for calls to getBackupSchedule. */
+    public UnaryCallSettings.Builder<GetBackupScheduleRequest, BackupSchedule>
+        getBackupScheduleSettings() {
+      return getStubSettingsBuilder().getBackupScheduleSettings();
+    }
+
+    /** Returns the builder for the settings used for calls to updateBackupSchedule. */
+    public UnaryCallSettings.Builder<UpdateBackupScheduleRequest, BackupSchedule>
+        updateBackupScheduleSettings() {
+      return getStubSettingsBuilder().updateBackupScheduleSettings();
+    }
+
+    /** Returns the builder for the settings used for calls to deleteBackupSchedule. */
+    public UnaryCallSettings.Builder<DeleteBackupScheduleRequest, Empty>
+        deleteBackupScheduleSettings() {
+      return getStubSettingsBuilder().deleteBackupScheduleSettings();
+    }
+
+    /** Returns the builder for the settings used for calls to listBackupSchedules. */
+    public PagedCallSettings.Builder<
+            ListBackupSchedulesRequest,
+            ListBackupSchedulesResponse,
+            ListBackupSchedulesPagedResponse>
+        listBackupSchedulesSettings() {
+      return getStubSettingsBuilder().listBackupSchedulesSettings();
     }
 
     @Override

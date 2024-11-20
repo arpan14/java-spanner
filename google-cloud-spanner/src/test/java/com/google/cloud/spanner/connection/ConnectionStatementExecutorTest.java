@@ -31,7 +31,7 @@ import com.google.cloud.spanner.Dialect;
 import com.google.cloud.spanner.TimestampBound;
 import com.google.cloud.spanner.connection.PgTransactionMode.AccessMode;
 import com.google.cloud.spanner.connection.PgTransactionMode.IsolationLevel;
-import com.google.protobuf.Duration;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import org.junit.Before;
 import org.junit.Test;
@@ -128,11 +128,11 @@ public class ConnectionStatementExecutorTest {
 
   @Test
   public void testStatementGetStatementTimeout() {
-    subject.statementSetStatementTimeout(Duration.newBuilder().setSeconds(1L).build());
+    subject.statementSetStatementTimeout(Duration.ofSeconds(1L));
     when(connection.hasStatementTimeout()).thenReturn(true);
     subject.statementShowStatementTimeout();
     verify(connection, atLeastOnce()).getStatementTimeout(any(TimeUnit.class));
-    subject.statementSetStatementTimeout(Duration.getDefaultInstance());
+    subject.statementSetStatementTimeout(Duration.ZERO);
     when(connection.hasStatementTimeout()).thenReturn(false);
   }
 
@@ -212,7 +212,7 @@ public class ConnectionStatementExecutorTest {
 
   @Test
   public void testStatementSetStatementTimeout() {
-    subject.statementSetStatementTimeout(Duration.newBuilder().setNanos(100).build());
+    subject.statementSetStatementTimeout(Duration.ofNanos(100));
     verify(connection).setStatementTimeout(100L, TimeUnit.NANOSECONDS);
   }
 
@@ -251,5 +251,30 @@ public class ConnectionStatementExecutorTest {
 
     verify(connection, never()).setTransactionMode(TransactionMode.READ_ONLY_TRANSACTION);
     verify(connection, never()).setTransactionMode(TransactionMode.READ_WRITE_TRANSACTION);
+  }
+
+  @Test
+  public void testStatementSetProtoDescriptors() {
+    subject.statementSetProtoDescriptors("protoDescriptor".getBytes());
+    verify(connection).setProtoDescriptors("protoDescriptor".getBytes());
+  }
+
+  @Test
+  public void testStatementSetProtoDescriptorsFilePath() {
+    String filePath = "com/google/cloud/spanner/descriptors.pb";
+    subject.statementSetProtoDescriptorsFilePath(filePath);
+    verify(connection).setProtoDescriptorsFilePath(filePath);
+  }
+
+  @Test
+  public void testStatementGetProtoDescriptors() {
+    subject.statementShowProtoDescriptors();
+    verify(connection).getProtoDescriptors();
+  }
+
+  @Test
+  public void testStatementGetProtoDescriptorsFilePath() {
+    subject.statementShowProtoDescriptorsFilePath();
+    verify(connection).getProtoDescriptorsFilePath();
   }
 }

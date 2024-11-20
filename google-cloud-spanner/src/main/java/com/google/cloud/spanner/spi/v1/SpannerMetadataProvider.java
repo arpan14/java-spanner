@@ -15,20 +15,29 @@
  */
 package com.google.cloud.spanner.spi.v1;
 
+import com.google.cloud.spanner.SpannerExceptionFactory;
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Strings;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.ImmutableMap;
 import io.grpc.Metadata;
 import io.grpc.Metadata.Key;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** For internal use only. */
 class SpannerMetadataProvider {
+  private final Cache<String, Map<String, List<String>>> extraHeadersCache =
+      CacheBuilder.newBuilder().maximumSize(100).build();
   private final Map<Metadata.Key<String>, String> headers;
   private final String resourceHeaderKey;
   private static final String ROUTE_TO_LEADER_HEADER_KEY = "x-goog-spanner-route-to-leader";
+  private static final String END_TO_END_TRACING_HEADER_KEY = "x-goog-spanner-end-to-end-tracing";
   private static final Pattern[] RESOURCE_TOKEN_PATTERNS = {
     Pattern.compile("^(?<headerValue>projects/[^/]*/instances/[^/]*/databases/[^/]*)(.*)?"),
     Pattern.compile("^(?<headerValue>projects/[^/]*/instances/[^/]*)(.*)?")
@@ -36,6 +45,8 @@ class SpannerMetadataProvider {
 
   private static final Map<String, List<String>> ROUTE_TO_LEADER_HEADER_MAP =
       ImmutableMap.of(ROUTE_TO_LEADER_HEADER_KEY, Collections.singletonList("true"));
+  private static final Map<String, List<String>> END_TO_END_TRACING_HEADER_MAP =
+      ImmutableMap.of(END_TO_END_TRACING_HEADER_KEY, Collections.singletonList("true"));
 
   private SpannerMetadataProvider(Map<String, String> headers, String resourceHeaderKey) {
     this.resourceHeaderKey = resourceHeaderKey;
@@ -61,16 +72,28 @@ class SpannerMetadataProvider {
 
   Map<String, List<String>> newExtraHeaders(
       String resourceTokenTemplate, String defaultResourceToken) {
-    return ImmutableMap.<String, List<String>>builder()
-        .put(
-            resourceHeaderKey,
-            Collections.singletonList(
-                getResourceHeaderValue(resourceTokenTemplate, defaultResourceToken)))
-        .build();
+    try {
+      return extraHeadersCache.get(
+          MoreObjects.firstNonNull(resourceTokenTemplate, ""),
+          () ->
+              ImmutableMap.<String, List<String>>builder()
+                  .put(
+                      resourceHeaderKey,
+                      Collections.singletonList(
+                          getResourceHeaderValue(resourceTokenTemplate, defaultResourceToken)))
+                  .build());
+    } catch (ExecutionException executionException) {
+      // This should never happen.
+      throw SpannerExceptionFactory.asSpannerException(executionException.getCause());
+    }
   }
 
   Map<String, List<String>> newRouteToLeaderHeader() {
     return ROUTE_TO_LEADER_HEADER_MAP;
+  }
+
+  Map<String, List<String>> newEndToEndTracingHeader() {
+    return END_TO_END_TRACING_HEADER_MAP;
   }
 
   private Map<Metadata.Key<String>, String> constructHeadersAsMetadata(
@@ -86,7 +109,7 @@ class SpannerMetadataProvider {
 
   private String getResourceHeaderValue(String resourceTokenTemplate, String defaultResourceToken) {
     String resourceToken = defaultResourceToken;
-    if (resourceTokenTemplate != null) {
+    if (!Strings.isNullOrEmpty(resourceTokenTemplate)) {
       for (Pattern pattern : RESOURCE_TOKEN_PATTERNS) {
         Matcher m = pattern.matcher(resourceTokenTemplate);
         if (m.matches()) {

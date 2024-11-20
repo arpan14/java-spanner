@@ -36,6 +36,7 @@ import com.google.cloud.spanner.Options.ReadOption;
 import com.google.cloud.spanner.SessionClient.SessionOption;
 import com.google.cloud.spanner.SessionImpl.SessionTransaction;
 import com.google.cloud.spanner.spi.v1.SpannerRpc;
+import com.google.cloud.spanner.spi.v1.SpannerRpc.Option;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
@@ -47,6 +48,7 @@ import com.google.spanner.v1.ExecuteBatchDmlRequest;
 import com.google.spanner.v1.ExecuteSqlRequest;
 import com.google.spanner.v1.ExecuteSqlRequest.QueryMode;
 import com.google.spanner.v1.ExecuteSqlRequest.QueryOptions;
+import com.google.spanner.v1.MultiplexedSessionPrecommitToken;
 import com.google.spanner.v1.PartialResultSet;
 import com.google.spanner.v1.ReadRequest;
 import com.google.spanner.v1.RequestOptions;
@@ -68,6 +70,7 @@ abstract class AbstractReadContext
 
   abstract static class Builder<B extends Builder<?, T>, T extends AbstractReadContext> {
     private SessionImpl session;
+    private boolean cancelQueryWhenClientIsClosed;
     private SpannerRpc rpc;
     private ISpan span;
     private TraceWrapper tracer;
@@ -87,6 +90,11 @@ abstract class AbstractReadContext
 
     B setSession(SessionImpl session) {
       this.session = session;
+      return self();
+    }
+
+    B setCancelQueryWhenClientIsClosed(boolean cancelQueryWhenClientIsClosed) {
+      this.cancelQueryWhenClientIsClosed = cancelQueryWhenClientIsClosed;
       return self();
     }
 
@@ -183,7 +191,7 @@ abstract class AbstractReadContext
     @GuardedBy("lock")
     private boolean used;
 
-    private final Map<SpannerRpc.Option, ?> channelHint;
+    private Map<SpannerRpc.Option, ?> channelHint;
 
     private SingleReadContext(Builder builder) {
       super(builder);
@@ -225,6 +233,16 @@ abstract class AbstractReadContext
     @Override
     Map<SpannerRpc.Option, ?> getTransactionChannelHint() {
       return channelHint;
+    }
+
+    @Override
+    boolean prepareRetryOnDifferentGrpcChannel() {
+      if (session.getIsMultiplexed() && channelHint.get(Option.CHANNEL_HINT) != null) {
+        long channelHintForTransaction = Option.CHANNEL_HINT.getLong(channelHint) + 1L;
+        channelHint = optionMap(SessionOption.channelHint(channelHintForTransaction));
+        return true;
+      }
+      return super.prepareRetryOnDifferentGrpcChannel();
     }
   }
 
@@ -439,6 +457,7 @@ abstract class AbstractReadContext
 
   final Object lock = new Object();
   final SessionImpl session;
+  final boolean cancelQueryWhenClientIsClosed;
   final SpannerRpc rpc;
   final ExecutorProvider executorProvider;
   ISpan span;
@@ -457,7 +476,7 @@ abstract class AbstractReadContext
 
   // A per-transaction sequence number used to identify this ExecuteSqlRequests. Required for DML,
   // ignored for query by the server.
-  private AtomicLong seqNo = new AtomicLong();
+  private final AtomicLong seqNo = new AtomicLong();
 
   // Allow up to 512MB to be buffered (assuming 1MB chunks). In practice, restart tokens are sent
   // much more frequently.
@@ -468,6 +487,7 @@ abstract class AbstractReadContext
 
   AbstractReadContext(Builder<?, ?> builder) {
     this.session = builder.session;
+    this.cancelQueryWhenClientIsClosed = builder.cancelQueryWhenClientIsClosed;
     this.rpc = builder.rpc;
     this.defaultPrefetchChunks = builder.defaultPrefetchChunks;
     this.defaultQueryOptions = builder.defaultQueryOptions;
@@ -486,6 +506,10 @@ abstract class AbstractReadContext
 
   long getSeqNo() {
     return seqNo.incrementAndGet();
+  }
+
+  protected boolean isReadOnly() {
+    return true;
   }
 
   protected boolean isRouteToLeader() {
@@ -622,19 +646,18 @@ abstract class AbstractReadContext
   @VisibleForTesting
   QueryOptions buildQueryOptions(QueryOptions requestOptions) {
     // Shortcut for the most common return value.
-    if (defaultQueryOptions.equals(QueryOptions.getDefaultInstance()) && requestOptions == null) {
-      return QueryOptions.getDefaultInstance();
+    if (requestOptions == null) {
+      return defaultQueryOptions;
     }
-    // Create a builder based on the default query options.
-    QueryOptions.Builder builder = defaultQueryOptions.toBuilder();
-    // Then overwrite with specific options for this query.
-    if (requestOptions != null) {
-      builder.mergeFrom(requestOptions);
-    }
-    return builder.build();
+    return defaultQueryOptions.toBuilder().mergeFrom(requestOptions).build();
   }
 
   RequestOptions buildRequestOptions(Options options) {
+    // Shortcut for the most common return value.
+    if (!(options.hasPriority() || options.hasTag() || getTransactionTag() != null)) {
+      return RequestOptions.getDefaultInstance();
+    }
+
     RequestOptions.Builder builder = RequestOptions.newBuilder();
     if (options.hasPriority()) {
       builder.setPriority(options.priority());
@@ -655,16 +678,7 @@ abstract class AbstractReadContext
             .setSql(statement.getSql())
             .setQueryMode(queryMode)
             .setSession(session.getName());
-    Map<String, Value> stmtParameters = statement.getParameters();
-    if (!stmtParameters.isEmpty()) {
-      com.google.protobuf.Struct.Builder paramsBuilder = builder.getParamsBuilder();
-      for (Map.Entry<String, Value> param : stmtParameters.entrySet()) {
-        paramsBuilder.putFields(param.getKey(), Value.toProto(param.getValue()));
-        if (param.getValue() != null && param.getValue().getType() != null) {
-          builder.putParamTypes(param.getKey(), param.getValue().getType().toProto());
-        }
-      }
-    }
+    addParameters(builder, statement.getParameters());
     if (withTransactionSelector) {
       TransactionSelector selector = getTransactionSelector();
       if (selector != null) {
@@ -679,10 +693,24 @@ abstract class AbstractReadContext
     } else if (defaultDirectedReadOptions != null) {
       builder.setDirectedReadOptions(defaultDirectedReadOptions);
     }
-    builder.setSeqno(getSeqNo());
+    if (!isReadOnly()) {
+      builder.setSeqno(getSeqNo());
+    }
     builder.setQueryOptions(buildQueryOptions(statement.getQueryOptions()));
     builder.setRequestOptions(buildRequestOptions(options));
     return builder;
+  }
+
+  static void addParameters(ExecuteSqlRequest.Builder builder, Map<String, Value> stmtParameters) {
+    if (!stmtParameters.isEmpty()) {
+      com.google.protobuf.Struct.Builder paramsBuilder = builder.getParamsBuilder();
+      for (Map.Entry<String, Value> param : stmtParameters.entrySet()) {
+        paramsBuilder.putFields(param.getKey(), Value.toProto(param.getValue()));
+        if (param.getValue() != null && param.getValue().getType() != null) {
+          builder.putParamTypes(param.getKey(), param.getValue().getType().toProto());
+        }
+      }
+    }
   }
 
   ExecuteBatchDmlRequest.Builder getExecuteBatchDmlRequestBuilder(
@@ -735,11 +763,19 @@ abstract class AbstractReadContext
             SpannerImpl.QUERY,
             span,
             tracer,
+            tracer.createStatementAttributes(statement, options),
+            session.getErrorHandler(),
             rpc.getExecuteQueryRetrySettings(),
             rpc.getExecuteQueryRetryableCodes()) {
           @Override
-          CloseableIterator<PartialResultSet> startStream(@Nullable ByteString resumeToken) {
-            GrpcStreamIterator stream = new GrpcStreamIterator(statement, prefetchChunks);
+          CloseableIterator<PartialResultSet> startStream(
+              @Nullable ByteString resumeToken,
+              AsyncResultSet.StreamMessageListener streamListener) {
+            GrpcStreamIterator stream =
+                new GrpcStreamIterator(statement, prefetchChunks, cancelQueryWhenClientIsClosed);
+            if (streamListener != null) {
+              stream.registerListener(streamListener);
+            }
             if (partitionToken != null) {
               request.setPartitionToken(partitionToken);
             }
@@ -760,9 +796,14 @@ abstract class AbstractReadContext
                     getTransactionChannelHint(),
                     isRouteToLeader());
             session.markUsed(clock.instant());
-            call.request(prefetchChunks);
             stream.setCall(call, request.getTransaction().hasBegin());
+            call.request(prefetchChunks);
             return stream;
+          }
+
+          @Override
+          boolean prepareIteratorForRetryOnDifferentGrpcChannel() {
+            return AbstractReadContext.this.prepareRetryOnDifferentGrpcChannel();
           }
         };
     return new GrpcResultSet(
@@ -809,6 +850,7 @@ abstract class AbstractReadContext
 
   @Override
   public void close() {
+    session.onTransactionDone();
     span.end();
     synchronized (lock) {
       isClosed = true;
@@ -828,6 +870,10 @@ abstract class AbstractReadContext
    * ensuring all RPCs within a transaction land up on the same channel.
    */
   abstract Map<SpannerRpc.Option, ?> getTransactionChannelHint();
+
+  boolean prepareRetryOnDifferentGrpcChannel() {
+    return false;
+  }
 
   /**
    * Returns the transaction tag for this {@link AbstractReadContext} or <code>null</code> if this
@@ -852,6 +898,13 @@ abstract class AbstractReadContext
   public void onDone(boolean withBeginTransaction) {
     this.session.onReadDone();
   }
+
+  /**
+   * For transactions other than read-write, the MultiplexedSessionPrecommitToken will not be
+   * present in the RPC response. In such cases, this method will be a no-op.
+   */
+  @Override
+  public void onPrecommitToken(MultiplexedSessionPrecommitToken token) {}
 
   private ResultSet readInternal(
       String table,
@@ -891,6 +944,9 @@ abstract class AbstractReadContext
     if (readOptions.hasDataBoostEnabled()) {
       builder.setDataBoostEnabled(readOptions.dataBoostEnabled());
     }
+    if (readOptions.hasOrderBy()) {
+      builder.setOrderBy(readOptions.orderBy());
+    }
     if (readOptions.hasDirectedReadOptions()) {
       builder.setDirectedReadOptions(readOptions.directedReadOptions());
     } else if (defaultDirectedReadOptions != null) {
@@ -904,11 +960,18 @@ abstract class AbstractReadContext
             SpannerImpl.READ,
             span,
             tracer,
+            session.getErrorHandler(),
             rpc.getReadRetrySettings(),
             rpc.getReadRetryableCodes()) {
           @Override
-          CloseableIterator<PartialResultSet> startStream(@Nullable ByteString resumeToken) {
-            GrpcStreamIterator stream = new GrpcStreamIterator(prefetchChunks);
+          CloseableIterator<PartialResultSet> startStream(
+              @Nullable ByteString resumeToken,
+              AsyncResultSet.StreamMessageListener streamListener) {
+            GrpcStreamIterator stream =
+                new GrpcStreamIterator(prefetchChunks, cancelQueryWhenClientIsClosed);
+            if (streamListener != null) {
+              stream.registerListener(streamListener);
+            }
             TransactionSelector selector = null;
             if (resumeToken != null) {
               builder.setResumeToken(resumeToken);
@@ -927,9 +990,14 @@ abstract class AbstractReadContext
                     getTransactionChannelHint(),
                     isRouteToLeader());
             session.markUsed(clock.instant());
-            call.request(prefetchChunks);
             stream.setCall(call, /* withBeginTransaction = */ builder.getTransaction().hasBegin());
+            call.request(prefetchChunks);
             return stream;
+          }
+
+          @Override
+          boolean prepareIteratorForRetryOnDifferentGrpcChannel() {
+            return AbstractReadContext.this.prepareRetryOnDifferentGrpcChannel();
           }
         };
     return new GrpcResultSet(

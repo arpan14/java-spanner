@@ -63,6 +63,7 @@ import org.threeten.bp.Duration;
 @Category(TracerTest.class)
 @RunWith(JUnit4.class)
 public class SpanTest {
+
   private static final String TEST_PROJECT = "my-project";
   private static final String TEST_INSTANCE = "my-instance";
   private static final String TEST_DATABASE = "my-database";
@@ -506,12 +507,13 @@ public class SpanTest {
     Map<String, Boolean> spans = failOnOverkillTraceComponent.getSpans();
 
     if (isMultiplexedSessionsEnabled()) {
-      assertEquals(spans.toString(), 4, spans.size());
+      assertEquals(spans.toString(), 5, spans.size());
       assertThat(spans).containsEntry("CloudSpannerOperation.CreateMultiplexedSession", true);
     } else {
-      assertThat(spans.size()).isEqualTo(3);
+      assertThat(spans.size()).isEqualTo(4);
     }
     assertThat(spans).containsEntry("CloudSpanner.ReadWriteTransaction", true);
+    assertThat(spans).containsEntry("CloudSpannerOperation.ExecuteUpdate", true);
     assertThat(spans).containsEntry("CloudSpannerOperation.BatchCreateSessions", true);
     assertThat(spans).containsEntry("CloudSpannerOperation.BatchCreateSessionsRequest", true);
 

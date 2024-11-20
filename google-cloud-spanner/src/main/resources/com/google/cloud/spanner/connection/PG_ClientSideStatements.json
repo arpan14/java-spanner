@@ -150,6 +150,15 @@
       "exampleStatements": ["show spanner.transaction_tag","show variable spanner.transaction_tag"]
     },
     {
+      "name": "SHOW [VARIABLE] SPANNER.EXCLUDE_TXN_FROM_CHANGE_STREAMS",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "RESULT_SET",
+      "statementType": "SHOW_EXCLUDE_TXN_FROM_CHANGE_STREAMS",
+      "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.exclude_txn_from_change_streams\\s*\\z",
+      "method": "statementShowExcludeTxnFromChangeStreams",
+      "exampleStatements": ["show spanner.exclude_txn_from_change_streams","show variable spanner.exclude_txn_from_change_streams"]
+    },
+    {
       "name": "SHOW [VARIABLE] SPANNER.RPC_PRIORITY",
       "executorName": "ClientSideStatementNoParamExecutor",
       "resultType": "RESULT_SET",
@@ -175,6 +184,42 @@
       "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.delay_transaction_start_until_first_write\\s*\\z",
       "method": "statementShowDelayTransactionStartUntilFirstWrite",
       "exampleStatements": ["show spanner.delay_transaction_start_until_first_write","show variable spanner.delay_transaction_start_until_first_write"]
+    },
+    {
+      "name": "SHOW [VARIABLE] SPANNER.KEEP_TRANSACTION_ALIVE",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "RESULT_SET",
+      "statementType": "SHOW_KEEP_TRANSACTION_ALIVE",
+      "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.keep_transaction_alive\\s*\\z",
+      "method": "statementShowKeepTransactionAlive",
+      "exampleStatements": ["show spanner.keep_transaction_alive","show variable spanner.keep_transaction_alive"]
+    },
+    {
+      "name": "SHOW [VARIABLE] SPANNER.AUTO_BATCH_DML",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "RESULT_SET",
+      "statementType": "SHOW_AUTO_BATCH_DML",
+      "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.auto_batch_dml\\s*\\z",
+      "method": "statementShowAutoBatchDml",
+      "exampleStatements": ["show spanner.auto_batch_dml", "show variable spanner.auto_batch_dml"]
+    },
+    {
+      "name": "SHOW [VARIABLE] SPANNER.AUTO_BATCH_DML_UPDATE_COUNT",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "RESULT_SET",
+      "statementType": "SHOW_AUTO_BATCH_DML_UPDATE_COUNT",
+      "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.auto_batch_dml_update_count\\s*\\z",
+      "method": "statementShowAutoBatchDmlUpdateCount",
+      "exampleStatements": ["show spanner.auto_batch_dml_update_count","show variable spanner.auto_batch_dml_update_count"]
+    },
+    {
+      "name": "SHOW [VARIABLE] SPANNER.AUTO_BATCH_DML_UPDATE_COUNT_VERIFICATION",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "RESULT_SET",
+      "statementType": "SHOW_AUTO_BATCH_DML_UPDATE_COUNT_VERIFICATION",
+      "regex": "(?is)\\A\\s*show\\s+(?:variable\\s+)?spanner\\.auto_batch_dml_update_count_verification\\s*\\z",
+      "method": "statementShowAutoBatchDmlUpdateCountVerification",
+      "exampleStatements": ["show spanner.auto_batch_dml_update_count_verification","show variable spanner.auto_batch_dml_update_count_verification"]
     },
     {
       "name": "SHOW [VARIABLE] TRANSACTION ISOLATION LEVEL",
@@ -320,6 +365,15 @@
       "examplePrerequisiteStatements": ["start batch ddl"]
     },
     {
+      "name": "RESET ALL",
+      "executorName": "ClientSideStatementNoParamExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "RESET_ALL",
+      "regex": "(?is)\\A\\s*(?:reset)(?:\\s+all)\\s*\\z",
+      "method": "statementResetAll",
+      "exampleStatements": ["reset all"]
+    },
+    {
       "name": "SET AUTOCOMMIT =|TO TRUE|FALSE",
       "executorName": "ClientSideStatementSetExecutor",
       "resultType": "NO_RESULT",
@@ -394,9 +448,13 @@
       "method": "statementSetStatementTimeout",
       "exampleStatements": [
         "set statement_timeout=default",
+        "set statement_timeout = default ",
+        "set statement_timeout = DEFAULT ",
         "set statement_timeout='1s'",
+        "set statement_timeout = '1s' ",
         "set statement_timeout='100ms'",
         "set statement_timeout=100",
+        "set statement_timeout = 100 ",
         "set statement_timeout='10000us'",
         "set statement_timeout='9223372036854775807ns'",
         "set statement_timeout to default",
@@ -409,7 +467,7 @@
       "setStatement": {
         "propertyName": "STATEMENT_TIMEOUT",
         "separator": "(?:=|\\s+TO\\s+)",
-        "allowedValues": "(\\d{1,19}|'(\\d{1,19})(s|ms|us|ns)'|DEFAULT)",
+        "allowedValues": "('(\\d{1,19})(s|ms|us|ns)'|\\d{1,19}|DEFAULT)",
         "converterName": "ClientSideStatementValueConverters$PgDurationConverter"
       }
     },
@@ -624,11 +682,23 @@
       "statementType": "SET_MAX_COMMIT_DELAY",
       "regex": "(?is)\\A\\s*set\\s+spanner\\.max_commit_delay(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
       "method": "statementSetMaxCommitDelay",
-      "exampleStatements": ["set spanner.max_commit_delay=null", "set spanner.max_commit_delay='1s'", "set spanner.max_commit_delay='100ms'", "set spanner.max_commit_delay to '10000us'", "set spanner.max_commit_delay TO '9223372036854775807ns'"],
+      "exampleStatements": [
+        "set spanner.max_commit_delay=null",
+        "set spanner.max_commit_delay = NULL",
+        "set spanner.max_commit_delay = null ",
+        "set spanner.max_commit_delay='1s'",
+        "set spanner.max_commit_delay = '1s'",
+        "set spanner.max_commit_delay = '1s' ",
+        "set spanner.max_commit_delay=1000",
+        "set spanner.max_commit_delay = 1000",
+        "set spanner.max_commit_delay = 1000 ",
+        "set spanner.max_commit_delay='100ms'",
+        "set spanner.max_commit_delay to '10000us'",
+        "set spanner.max_commit_delay TO '9223372036854775807ns'"],
       "setStatement": {
         "propertyName": "SPANNER.MAX_COMMIT_DELAY",
         "separator": "(?:=|\\s+TO\\s+)",
-        "allowedValues": "('(\\d{1,19})(s|ms|us|ns)'|NULL)",
+        "allowedValues": "('(\\d{1,19})(s|ms|us|ns)'|\\d{1,19}|NULL)",
         "converterName": "ClientSideStatementValueConverters$DurationConverter"
       }
     },
@@ -677,6 +747,21 @@
         "separator": "(?:=|\\s+TO\\s+)",
         "allowedValues": "'(.*)'",
         "converterName": "ClientSideStatementValueConverters$StringValueConverter"
+      }
+    },
+    {
+      "name": "SET SPANNER.EXCLUDE_TXN_FROM_CHANGE_STREAMS =|TO TRUE|FALSE",
+      "executorName": "ClientSideStatementSetExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "SET_EXCLUDE_TXN_FROM_CHANGE_STREAMS",
+      "regex": "(?is)\\A\\s*set\\s+spanner\\.exclude_txn_from_change_streams(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
+      "method": "statementSetReturnCommitStats",
+      "exampleStatements": ["set spanner.exclude_txn_from_change_streams = true", "set spanner.exclude_txn_from_change_streams = false", "set spanner.exclude_txn_from_change_streams to true", "set spanner.exclude_txn_from_change_streams to false"],
+      "setStatement": {
+        "propertyName": "SPANNER.EXCLUDE_TXN_FROM_CHANGE_STREAMS",
+        "separator": "(?:=|\\s+TO\\s+)",
+        "allowedValues": "(TRUE|FALSE)",
+        "converterName": "ClientSideStatementValueConverters$BooleanConverter"
       }
     },
     {
@@ -740,6 +825,67 @@
         "converterName": "ClientSideStatementValueConverters$BooleanConverter"
       }
     },
+    {
+      "name": "SET SPANNER.KEEP_TRANSACTION_ALIVE = TRUE|FALSE",
+      "executorName": "ClientSideStatementSetExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "SET_KEEP_TRANSACTION_ALIVE",
+      "regex": "(?is)\\A\\s*set\\s+spanner\\.keep_transaction_alive(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
+      "method": "statementSetKeepTransactionAlive",
+      "exampleStatements": ["set spanner.keep_transaction_alive = true", "set spanner.keep_transaction_alive = false", "set spanner.keep_transaction_alive to true", "set spanner.keep_transaction_alive to false"],
+      "setStatement": {
+        "propertyName": "SPANNER.KEEP_TRANSACTION_ALIVE",
+        "separator": "(?:=|\\s+TO\\s+)",
+        "allowedValues": "(TRUE|FALSE)",
+        "converterName": "ClientSideStatementValueConverters$BooleanConverter"
+      }
+    },
+    {
+      "name": "SET SPANNER.AUTO_BATCH_DML = TRUE|FALSE",
+      "executorName": "ClientSideStatementSetExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "SET_AUTO_BATCH_DML",
+      "regex": "(?is)\\A\\s*set\\s+spanner\\.auto_batch_dml(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
+      "method": "statementSetAutoBatchDml",
+      "exampleStatements": ["set spanner.auto_batch_dml = true", "set spanner.auto_batch_dml = false", "set spanner.auto_batch_dml to true", "set spanner.auto_batch_dml to false", "set spanner.auto_batch_dml to off"],
+      "setStatement": {
+        "propertyName": "SPANNER.AUTO_BATCH_DML",
+        "separator": "(?:=|\\s+TO\\s+)",
+        "allowedValues": "(.+)",
+        "converterName": "ClientSideStatementValueConverters$PgBooleanConverter"
+      }
+    },
+    {
+      "name": "SET SPANNER.AUTO_BATCH_DML_UPDATE_COUNT = <bigint>",
+      "executorName": "ClientSideStatementSetExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "SET_AUTO_BATCH_DML_UPDATE_COUNT",
+      "regex": "(?is)\\A\\s*set\\s+spanner\\.auto_batch_dml_update_count(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
+      "method": "statementSetAutoBatchDmlUpdateCount",
+      "exampleStatements": ["set spanner.auto_batch_dml_update_count = 0", "set spanner.auto_batch_dml_update_count = 100", "set spanner.auto_batch_dml_update_count to 1"],
+      "setStatement": {
+        "propertyName": "SPANNER.AUTO_BATCH_DML_UPDATE_COUNT",
+        "separator": "(?:=|\\s+TO\\s+)",
+        "allowedValues": "(\\d{1,19})",
+        "converterName": "ClientSideStatementValueConverters$LongConverter"
+      }
+    },
+    {
+      "name": "SET SPANNER.AUTO_BATCH_DML_UPDATE_COUNT_VERIFICATION = TRUE|FALSE",
+      "executorName": "ClientSideStatementSetExecutor",
+      "resultType": "NO_RESULT",
+      "statementType": "SET_AUTO_BATCH_DML_UPDATE_COUNT_VERIFICATION",
+      "regex": "(?is)\\A\\s*set\\s+spanner\\.auto_batch_dml_update_count_verification(?:\\s*=\\s*|\\s+to\\s+)(.*)\\z",
+      "method": "statementSetAutoBatchDmlUpdateCountVerification",
+      "exampleStatements": ["set spanner.auto_batch_dml_update_count_verification = true", "set spanner.auto_batch_dml_update_count_verification = false", "set spanner.auto_batch_dml_update_count_verification to true", "set spanner.auto_batch_dml_update_count_verification to false", "set spanner.auto_batch_dml_update_count_verification to off"],
+      "setStatement": {
+        "propertyName": "SPANNER.AUTO_BATCH_DML_UPDATE_COUNT_VERIFICATION",
+        "separator": "(?:=|\\s+TO\\s+)",
+        "allowedValues": "(.+)",
+        "converterName": "ClientSideStatementValueConverters$PgBooleanConverter"
+      }
+    },
+    
     {
       "name": "SHOW [VARIABLE] SPANNER.DATA_BOOST_ENABLED",
       "executorName": "ClientSideStatementNoParamExecutor",

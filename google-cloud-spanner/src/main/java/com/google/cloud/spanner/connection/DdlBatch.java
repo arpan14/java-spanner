@@ -35,12 +35,17 @@ import com.google.cloud.spanner.connection.AbstractStatementParser.ParsedStateme
 import com.google.cloud.spanner.connection.AbstractStatementParser.StatementType;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.spanner.admin.database.v1.DatabaseAdminGrpc;
 import com.google.spanner.admin.database.v1.UpdateDatabaseDdlMetadata;
+import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.context.Scope;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
+import javax.annotation.Nonnull;
 
 /**
  * {@link UnitOfWork} that is used when a DDL batch is started. These batches only accept DDL
@@ -55,10 +60,12 @@ class DdlBatch extends AbstractBaseUnitOfWork {
   private final DatabaseClient dbClient;
   private final List<String> statements = new ArrayList<>();
   private UnitOfWorkState state = UnitOfWorkState.STARTED;
+  private final byte[] protoDescriptors;
 
   static class Builder extends AbstractBaseUnitOfWork.Builder<Builder, DdlBatch> {
     private DdlClient ddlClient;
     private DatabaseClient dbClient;
+    private byte[] protoDescriptors;
 
     private Builder() {}
 
@@ -71,6 +78,11 @@ class DdlBatch extends AbstractBaseUnitOfWork {
     Builder setDatabaseClient(DatabaseClient client) {
       Preconditions.checkNotNull(client);
       this.dbClient = client;
+      return this;
+    }
+
+    Builder setProtoDescriptors(byte[] protoDescriptors) {
+      this.protoDescriptors = protoDescriptors;
       return this;
     }
 
@@ -90,6 +102,12 @@ class DdlBatch extends AbstractBaseUnitOfWork {
     super(builder);
     this.ddlClient = builder.ddlClient;
     this.dbClient = builder.dbClient;
+    this.protoDescriptors = builder.protoDescriptors;
+  }
+
+  @Override
+  public boolean isSingleUse() {
+    return false;
   }
 
   @Override
@@ -204,36 +222,51 @@ class DdlBatch extends AbstractBaseUnitOfWork {
   public ApiFuture<long[]> runBatchAsync(CallType callType) {
     ConnectionPreconditions.checkState(
         state == UnitOfWorkState.STARTED, "The batch is no longer active and cannot be ran");
-    if (statements.isEmpty()) {
-      this.state = UnitOfWorkState.RAN;
-      return ApiFutures.immediateFuture(new long[0]);
-    }
-    // create a statement that can be passed in to the execute method
-    Callable<long[]> callable =
-        () -> {
-          try {
-            OperationFuture<Void, UpdateDatabaseDdlMetadata> operation =
-                ddlClient.executeDdl(statements);
+    try (Scope ignore = span.makeCurrent()) {
+      if (statements.isEmpty()) {
+        this.state = UnitOfWorkState.RAN;
+        return ApiFutures.transform(
+            asyncEndUnitOfWorkSpan(), unused -> new long[0], MoreExecutors.directExecutor());
+      }
+      // Set the DDL statements on the span.
+
+      span.setAllAttributes(Attributes.of(DB_STATEMENT_ARRAY_KEY, statements));
+      // create a statement that can be passed in to the execute method
+      Callable<long[]> callable =
+          () -> {
             try {
-              // Wait until the operation has finished.
-              getWithStatementTimeout(operation, RUN_BATCH_STATEMENT);
-              long[] updateCounts = new long[statements.size()];
-              Arrays.fill(updateCounts, 1L);
-              state = UnitOfWorkState.RAN;
-              return updateCounts;
-            } catch (SpannerException e) {
-              long[] updateCounts = extractUpdateCounts(operation);
-              throw SpannerExceptionFactory.newSpannerBatchUpdateException(
-                  e.getErrorCode(), e.getMessage(), updateCounts);
+              OperationFuture<Void, UpdateDatabaseDdlMetadata> operation =
+                  ddlClient.executeDdl(statements, protoDescriptors);
+              try {
+                // Wait until the operation has finished.
+                getWithStatementTimeout(operation, RUN_BATCH_STATEMENT);
+                long[] updateCounts = new long[statements.size()];
+                Arrays.fill(updateCounts, 1L);
+                state = UnitOfWorkState.RAN;
+                return updateCounts;
+              } catch (SpannerException e) {
+                long[] updateCounts = extractUpdateCounts(operation);
+                throw SpannerExceptionFactory.newSpannerBatchUpdateException(
+                    e.getErrorCode(), e.getMessage(), updateCounts);
+              }
+            } catch (Throwable t) {
+              span.setStatus(StatusCode.ERROR);
+              span.recordException(t);
+              state = UnitOfWorkState.RUN_FAILED;
+              throw t;
             }
-          } catch (Throwable t) {
-            state = UnitOfWorkState.RUN_FAILED;
-            throw t;
-          }
-        };
-    this.state = UnitOfWorkState.RUNNING;
-    return executeStatementAsync(
-        callType, RUN_BATCH_STATEMENT, callable, DatabaseAdminGrpc.getUpdateDatabaseDdlMethod());
+          };
+      this.state = UnitOfWorkState.RUNNING;
+      ApiFuture<long[]> result =
+          executeStatementAsync(
+              callType,
+              RUN_BATCH_STATEMENT,
+              callable,
+              DatabaseAdminGrpc.getUpdateDatabaseDdlMethod());
+      asyncEndUnitOfWorkSpan();
+
+      return result;
+    }
   }
 
   long[] extractUpdateCounts(OperationFuture<Void, UpdateDatabaseDdlMetadata> operation) {
@@ -261,17 +294,20 @@ class DdlBatch extends AbstractBaseUnitOfWork {
   public void abortBatch() {
     ConnectionPreconditions.checkState(
         state == UnitOfWorkState.STARTED, "The batch is no longer active and cannot be aborted.");
+    asyncEndUnitOfWorkSpan();
     this.state = UnitOfWorkState.ABORTED;
   }
 
   @Override
-  public ApiFuture<Void> commitAsync(CallType callType) {
+  public ApiFuture<Void> commitAsync(
+      @Nonnull CallType callType, @Nonnull EndTransactionCallback callback) {
     throw SpannerExceptionFactory.newSpannerException(
         ErrorCode.FAILED_PRECONDITION, "Commit is not allowed for DDL batches.");
   }
 
   @Override
-  public ApiFuture<Void> rollbackAsync(CallType callType) {
+  public ApiFuture<Void> rollbackAsync(
+      @Nonnull CallType callType, @Nonnull EndTransactionCallback callback) {
     throw SpannerExceptionFactory.newSpannerException(
         ErrorCode.FAILED_PRECONDITION, "Rollback is not allowed for DDL batches.");
   }

@@ -47,6 +47,7 @@ import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
 
 /**
  * Internal connection API for Google Cloud Spanner. This interface may introduce breaking changes
@@ -170,6 +171,19 @@ public interface Connection extends AutoCloseable {
 
   /** @return <code>true</code> if this connection has been closed. */
   boolean isClosed();
+
+  /**
+   * Resets the state of this connection to the default state that it had when it was first created.
+   * Calling this method after a transaction has started (that is; after a statement has been
+   * executed in the transaction), does not change the active transaction. If for example a
+   * transaction has been started with a transaction tag, the transaction tag for the active
+   * transaction is not reset.
+   *
+   * <p>You can use this method to reset the state of the connection before returning a connection
+   * to a connection pool, and/or before using a connection that was retrieved from a connection
+   * pool.
+   */
+  void reset();
 
   /**
    * Sets autocommit on/off for this {@link Connection}. Connections in autocommit mode will apply
@@ -384,6 +398,41 @@ public interface Connection extends AutoCloseable {
    *     connection.
    */
   default String getStatementTag() {
+    throw new UnsupportedOperationException();
+  }
+
+  /**
+   * Sets whether the next transaction should be excluded from all change streams with the DDL
+   * option `allow_txn_exclusion=true`
+   */
+  default void setExcludeTxnFromChangeStreams(boolean excludeTxnFromChangeStreams) {
+    throw new UnsupportedOperationException();
+  }
+
+  /**
+   * Returns true if the next transaction should be excluded from all change streams with the DDL
+   * option `allow_txn_exclusion=true`
+   */
+  default boolean isExcludeTxnFromChangeStreams() {
+    throw new UnsupportedOperationException();
+  }
+
+  /**
+   * Sets the proto descriptors to use for the next DDL statement (single or batch) that will be
+   * executed. The proto descriptor is automatically cleared after the statement is executed.
+   *
+   * @param protoDescriptors The proto descriptors to use with the next DDL statement (single or
+   *     batch) that will be executed on this connection.
+   */
+  default void setProtoDescriptors(@Nonnull byte[] protoDescriptors) {
+    throw new UnsupportedOperationException();
+  }
+
+  /**
+   * @return The proto descriptor that will be used with the next DDL statement (single or batch)
+   *     that is executed on this connection.
+   */
+  default byte[] getProtoDescriptors() {
     throw new UnsupportedOperationException();
   }
 
@@ -618,6 +667,25 @@ public interface Connection extends AutoCloseable {
   }
 
   /**
+   * Sets whether this connection should keep read/write transactions alive by executing a SELECT 1
+   * once every 10 seconds during inactive read/write transactions.
+   *
+   * <p>NOTE: This will keep read/write transactions alive and hold on to locks until it is
+   * explicitly committed or rolled back.
+   */
+  default void setKeepTransactionAlive(boolean keepTransactionAlive) {
+    throw new UnsupportedOperationException("Unimplemented");
+  }
+
+  /**
+   * @return true if this connection keeps read/write transactions alive by executing a SELECT 1
+   *     once every 10 seconds during inactive read/write transactions.
+   */
+  default boolean isKeepTransactionAlive() {
+    throw new UnsupportedOperationException("Unimplemented");
+  }
+
+  /**
    * Commits the current transaction of this connection. All mutations that have been buffered
    * during the current transaction will be written to the database.
    *
@@ -772,6 +840,12 @@ public interface Connection extends AutoCloseable {
 
   /** Sets how savepoints should be supported on this connection. */
   void setSavepointSupport(SavepointSupport savepointSupport);
+
+  /** Returns the current {@link DdlInTransactionMode} for this connection. */
+  DdlInTransactionMode getDdlInTransactionMode();
+
+  /** Sets how the connection should behave if a DDL statement is executed during a transaction. */
+  void setDdlInTransactionMode(DdlInTransactionMode ddlInTransactionMode);
 
   /**
    * Creates a savepoint with the given name.
@@ -1090,6 +1164,45 @@ public interface Connection extends AutoCloseable {
    * @param queryMode the mode in which to execute the query
    */
   ResultSet analyzeQuery(Statement query, QueryAnalyzeMode queryMode);
+
+  /**
+   * Enables or disables automatic batching of DML statements. When enabled, DML statements that are
+   * executed on this connection will be buffered in memory instead of actually being executed. The
+   * buffered DML statements are flushed to Spanner when a statement that cannot be part of a DML
+   * batch is executed on the connection. This can be a query, a DDL statement with a THEN RETURN
+   * clause, or a Commit call. The update count that is returned for DML statements that are
+   * buffered is determined by the value that has been set with {@link
+   * #setAutoBatchDmlUpdateCount(long)}. The default is 1. The connection verifies that the update
+   * counts that were returned while buffering DML statements match the actual update counts that
+   * are returned by Spanner when the batch is executed. This verification can be disabled by
+   * calling {@link #setAutoBatchDmlUpdateCountVerification(boolean)}.
+   */
+  void setAutoBatchDml(boolean autoBatchDml);
+
+  /** Returns whether automatic DML batching is enabled on this connection. */
+  boolean isAutoBatchDml();
+
+  /**
+   * Sets the update count that is returned for DML statements that are buffered during an automatic
+   * DML batch. This value is only used if {@link #isAutoBatchDml()} is enabled.
+   */
+  void setAutoBatchDmlUpdateCount(long updateCount);
+
+  /**
+   * Returns the update count that is returned for DML statements that are buffered during an
+   * automatic DML batch.
+   */
+  long getAutoBatchDmlUpdateCount();
+
+  /**
+   * Sets whether the update count that is returned by Spanner after executing an automatic DML
+   * batch should be verified against the update counts that were returned during the buffering of
+   * those statements.
+   */
+  void setAutoBatchDmlUpdateCountVerification(boolean verification);
+
+  /** Indicates whether the update counts of automatic DML batches should be verified. */
+  boolean isAutoBatchDmlUpdateCountVerification();
 
   /**
    * Enable data boost for partitioned queries. See also {@link #partitionQuery(Statement,

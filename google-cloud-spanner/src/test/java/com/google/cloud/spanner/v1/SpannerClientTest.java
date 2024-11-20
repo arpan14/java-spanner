@@ -55,6 +55,7 @@ import com.google.spanner.v1.GetSessionRequest;
 import com.google.spanner.v1.KeySet;
 import com.google.spanner.v1.ListSessionsRequest;
 import com.google.spanner.v1.ListSessionsResponse;
+import com.google.spanner.v1.MultiplexedSessionPrecommitToken;
 import com.google.spanner.v1.Mutation;
 import com.google.spanner.v1.PartialResultSet;
 import com.google.spanner.v1.Partition;
@@ -545,6 +546,7 @@ public class SpannerClientTest {
             .setMetadata(ResultSetMetadata.newBuilder().build())
             .addAllRows(new ArrayList<ListValue>())
             .setStats(ResultSetStats.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
 
@@ -629,6 +631,7 @@ public class SpannerClientTest {
             .setChunkedValue(true)
             .setResumeToken(ByteString.EMPTY)
             .setStats(ResultSetStats.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
     ExecuteSqlRequest request =
@@ -702,6 +705,7 @@ public class SpannerClientTest {
         ExecuteBatchDmlResponse.newBuilder()
             .addAllResultSets(new ArrayList<ResultSet>())
             .setStatus(Status.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
 
@@ -762,6 +766,7 @@ public class SpannerClientTest {
             .setMetadata(ResultSetMetadata.newBuilder().build())
             .addAllRows(new ArrayList<ListValue>())
             .setStats(ResultSetStats.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
 
@@ -801,6 +806,8 @@ public class SpannerClientTest {
     Assert.assertEquals(request.getRequestOptions(), actualRequest.getRequestOptions());
     Assert.assertEquals(request.getDirectedReadOptions(), actualRequest.getDirectedReadOptions());
     Assert.assertEquals(request.getDataBoostEnabled(), actualRequest.getDataBoostEnabled());
+    Assert.assertEquals(request.getOrderBy(), actualRequest.getOrderBy());
+    Assert.assertEquals(request.getLockHint(), actualRequest.getLockHint());
     Assert.assertTrue(
         channelProvider.isHeaderSent(
             ApiClientHeaderProvider.getDefaultApiClientHeaderKey(),
@@ -845,6 +852,7 @@ public class SpannerClientTest {
             .setChunkedValue(true)
             .setResumeToken(ByteString.EMPTY)
             .setStats(ResultSetStats.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
     ReadRequest request =
@@ -918,6 +926,7 @@ public class SpannerClientTest {
         Transaction.newBuilder()
             .setId(ByteString.EMPTY)
             .setReadTimestamp(Timestamp.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
 
@@ -960,6 +969,7 @@ public class SpannerClientTest {
         Transaction.newBuilder()
             .setId(ByteString.EMPTY)
             .setReadTimestamp(Timestamp.newBuilder().build())
+            .setPrecommitToken(MultiplexedSessionPrecommitToken.newBuilder().build())
             .build();
     mockSpanner.addResponse(expectedResponse);
 

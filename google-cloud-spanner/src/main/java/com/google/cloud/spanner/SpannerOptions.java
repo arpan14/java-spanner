@@ -21,12 +21,18 @@ import com.google.api.core.BetaApi;
 import com.google.api.core.InternalApi;
 import com.google.api.core.ObsoleteApi;
 import com.google.api.gax.core.ExecutorProvider;
+import com.google.api.gax.core.GaxProperties;
 import com.google.api.gax.grpc.GrpcCallContext;
 import com.google.api.gax.grpc.GrpcInterceptorProvider;
 import com.google.api.gax.longrunning.OperationTimedPollAlgorithm;
 import com.google.api.gax.retrying.RetrySettings;
 import com.google.api.gax.rpc.ApiCallContext;
 import com.google.api.gax.rpc.TransportChannelProvider;
+import com.google.api.gax.tracing.ApiTracerFactory;
+import com.google.api.gax.tracing.BaseApiTracerFactory;
+import com.google.api.gax.tracing.MetricsTracerFactory;
+import com.google.api.gax.tracing.OpenTelemetryMetricsRecorder;
+import com.google.api.gax.tracing.OpencensusTracerFactory;
 import com.google.cloud.NoCredentials;
 import com.google.cloud.ServiceDefaults;
 import com.google.cloud.ServiceOptions;
@@ -64,10 +70,13 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.common.Attributes;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -99,7 +108,7 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
       ImmutableSet.of(
           "https://www.googleapis.com/auth/spanner.admin",
           "https://www.googleapis.com/auth/spanner.data");
-  private static final int MAX_CHANNELS = 256;
+  static final int MAX_CHANNELS = 256;
   @VisibleForTesting static final int DEFAULT_CHANNELS = 4;
   // Set the default number of channels to GRPC_GCP_ENABLED_DEFAULT_CHANNELS when gRPC-GCP extension
   // is enabled, to make sure there are sufficient channels available to move the sessions to a
@@ -127,6 +136,8 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
   private final boolean autoThrottleAdministrativeRequests;
   private final RetrySettings retryAdministrativeRequestsSettings;
   private final boolean trackTransactionStarter;
+  private final BuiltInOpenTelemetryMetricsProvider builtInOpenTelemetryMetricsProvider =
+      BuiltInOpenTelemetryMetricsProvider.INSTANCE;
   /**
    * These are the default {@link QueryOptions} defined by the user on this {@link SpannerOptions}.
    */
@@ -149,6 +160,10 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
   private final DirectedReadOptions directedReadOptions;
   private final boolean useVirtualThreads;
   private final OpenTelemetry openTelemetry;
+  private final boolean enableApiTracing;
+  private final boolean enableBuiltInMetrics;
+  private final boolean enableExtendedTracing;
+  private final boolean enableEndToEndTracing;
 
   enum TracingFramework {
     OPEN_CENSUS,
@@ -653,6 +668,10 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
     directedReadOptions = builder.directedReadOptions;
     useVirtualThreads = builder.useVirtualThreads;
     openTelemetry = builder.openTelemetry;
+    enableApiTracing = builder.enableApiTracing;
+    enableExtendedTracing = builder.enableExtendedTracing;
+    enableBuiltInMetrics = builder.enableBuiltInMetrics;
+    enableEndToEndTracing = builder.enableEndToEndTracing;
   }
 
   /**
@@ -665,7 +684,9 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
      * set.
      */
     @Nonnull
-    String getOptimizerVersion();
+    default String getOptimizerVersion() {
+      return "";
+    }
 
     /**
      * The optimizer statistics package to use. Must return an empty string to indicate that no
@@ -673,7 +694,23 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
      */
     @Nonnull
     default String getOptimizerStatisticsPackage() {
-      throw new UnsupportedOperationException("Unimplemented");
+      return "";
+    }
+
+    default boolean isEnableExtendedTracing() {
+      return false;
+    }
+
+    default boolean isEnableApiTracing() {
+      return false;
+    }
+
+    default boolean isEnableBuiltInMetrics() {
+      return true;
+    }
+
+    default boolean isEnableEndToEndTracing() {
+      return false;
     }
   }
 
@@ -686,18 +723,45 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
     private static final String SPANNER_OPTIMIZER_VERSION_ENV_VAR = "SPANNER_OPTIMIZER_VERSION";
     private static final String SPANNER_OPTIMIZER_STATISTICS_PACKAGE_ENV_VAR =
         "SPANNER_OPTIMIZER_STATISTICS_PACKAGE";
+    private static final String SPANNER_ENABLE_EXTENDED_TRACING = "SPANNER_ENABLE_EXTENDED_TRACING";
+    private static final String SPANNER_ENABLE_API_TRACING = "SPANNER_ENABLE_API_TRACING";
+    private static final String SPANNER_ENABLE_END_TO_END_TRACING =
+        "SPANNER_ENABLE_END_TO_END_TRACING";
+    private static final String SPANNER_DISABLE_BUILTIN_METRICS = "SPANNER_DISABLE_BUILTIN_METRICS";
 
     private SpannerEnvironmentImpl() {}
 
+    @Nonnull
     @Override
     public String getOptimizerVersion() {
       return MoreObjects.firstNonNull(System.getenv(SPANNER_OPTIMIZER_VERSION_ENV_VAR), "");
     }
 
+    @Nonnull
     @Override
     public String getOptimizerStatisticsPackage() {
       return MoreObjects.firstNonNull(
           System.getenv(SPANNER_OPTIMIZER_STATISTICS_PACKAGE_ENV_VAR), "");
+    }
+
+    @Override
+    public boolean isEnableExtendedTracing() {
+      return Boolean.parseBoolean(System.getenv(SPANNER_ENABLE_EXTENDED_TRACING));
+    }
+
+    @Override
+    public boolean isEnableApiTracing() {
+      return Boolean.parseBoolean(System.getenv(SPANNER_ENABLE_API_TRACING));
+    }
+
+    @Override
+    public boolean isEnableBuiltInMetrics() {
+      return !Boolean.parseBoolean(System.getenv(SPANNER_DISABLE_BUILTIN_METRICS));
+    }
+
+    @Override
+    public boolean isEnableEndToEndTracing() {
+      return Boolean.parseBoolean(System.getenv(SPANNER_ENABLE_END_TO_END_TRACING));
     }
   }
 
@@ -706,9 +770,7 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
       extends ServiceOptions.Builder<Spanner, SpannerOptions, SpannerOptions.Builder> {
     static final int DEFAULT_PREFETCH_CHUNKS = 4;
     static final QueryOptions DEFAULT_QUERY_OPTIONS = QueryOptions.getDefaultInstance();
-    // TODO: Set the default to DecodeMode.DIRECT before merging to keep the current default.
-    //       It is currently set to LAZY_PER_COL so it is used in all tests.
-    static final DecodeMode DEFAULT_DECODE_MODE = DecodeMode.LAZY_PER_COL;
+    static final DecodeMode DEFAULT_DECODE_MODE = DecodeMode.DIRECT;
     static final RetrySettings DEFAULT_ADMIN_REQUESTS_LIMIT_EXCEEDED_RETRY_SETTINGS =
         RetrySettings.newBuilder()
             .setInitialRetryDelay(Duration.ofSeconds(5L))
@@ -762,6 +824,10 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
     private DirectedReadOptions directedReadOptions;
     private boolean useVirtualThreads = false;
     private OpenTelemetry openTelemetry;
+    private boolean enableApiTracing = SpannerOptions.environment.isEnableApiTracing();
+    private boolean enableExtendedTracing = SpannerOptions.environment.isEnableExtendedTracing();
+    private boolean enableEndToEndTracing = SpannerOptions.environment.isEnableEndToEndTracing();
+    private boolean enableBuiltInMetrics = SpannerOptions.environment.isEnableBuiltInMetrics();
 
     private static String createCustomClientLibToken(String token) {
       return token + " " + ServiceOptions.getGoogApiClientLibName();
@@ -825,6 +891,10 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
       this.attemptDirectPath = options.attemptDirectPath;
       this.directedReadOptions = options.directedReadOptions;
       this.useVirtualThreads = options.useVirtualThreads;
+      this.enableApiTracing = options.enableApiTracing;
+      this.enableExtendedTracing = options.enableExtendedTracing;
+      this.enableBuiltInMetrics = options.enableBuiltInMetrics;
+      this.enableEndToEndTracing = options.enableEndToEndTracing;
     }
 
     @Override
@@ -1248,14 +1318,20 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
       return this;
     }
 
-    /** Enables gRPC-GCP extension with the default settings. */
+    /**
+     * Enables gRPC-GCP extension with the default settings. Do not set
+     * GOOGLE_CLOUD_SPANNER_MULTIPLEXED_SESSIONS to true in combination with this option, as
+     * Multiplexed sessions are not supported for gRPC-GCP.
+     */
     public Builder enableGrpcGcpExtension() {
       return this.enableGrpcGcpExtension(null);
     }
 
     /**
      * Enables gRPC-GCP extension and uses provided options for configuration. The metric registry
-     * and default Spanner metric labels will be added automatically.
+     * and default Spanner metric labels will be added automatically. Do not set
+     * GOOGLE_CLOUD_SPANNER_MULTIPLEXED_SESSIONS to true in combination with this option, as
+     * Multiplexed sessions are not supported for gRPC-GCP.
      */
     public Builder enableGrpcGcpExtension(GcpManagedChannelOptions options) {
       this.grpcGcpExtensionEnabled = true;
@@ -1318,6 +1394,51 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
     @BetaApi
     protected Builder setUseVirtualThreads(boolean useVirtualThreads) {
       this.useVirtualThreads = useVirtualThreads;
+      return this;
+    }
+
+    /**
+     * Creates and sets an {@link com.google.api.gax.tracing.ApiTracer} for the RPCs that are
+     * executed by this client. Enabling this creates traces for each individual RPC execution,
+     * including events/annotations when an RPC is retried or fails. The traces are only exported if
+     * an OpenTelemetry or OpenCensus trace exporter has been configured for the client.
+     */
+    public Builder setEnableApiTracing(boolean enableApiTracing) {
+      this.enableApiTracing = enableApiTracing;
+      return this;
+    }
+
+    /**
+     * Sets whether to enable or disable built in metrics for Data client operations. Built in
+     * metrics are enabled by default.
+     */
+    public Builder setBuiltInMetricsEnabled(boolean enableBuiltInMetrics) {
+      this.enableBuiltInMetrics = enableBuiltInMetrics;
+      return this;
+    }
+
+    /**
+     * Sets whether to enable extended OpenTelemetry tracing. Enabling this option will add the
+     * following additional attributes to the traces that are generated by the client:
+     *
+     * <ul>
+     *   <li>db.statement: Contains the SQL statement that is being executed.
+     *   <li>thread.name: The name of the thread that executes the statement.
+     * </ul>
+     */
+    public Builder setEnableExtendedTracing(boolean enableExtendedTracing) {
+      this.enableExtendedTracing = enableExtendedTracing;
+      return this;
+    }
+
+    /**
+     * Sets whether to enable end to end tracing. Enabling this option will create the trace spans
+     * at the Spanner layer. By default, end to end tracing is disabled. Enabling end to end tracing
+     * requires OpenTelemetry to be set up. Simply enabling this option won't generate traces at
+     * Spanner layer.
+     */
+    public Builder setEnableEndToEndTracing(boolean enableEndToEndTracing) {
+      this.enableEndToEndTracing = enableEndToEndTracing;
       return this;
     }
 
@@ -1410,6 +1531,7 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
    */
   @ObsoleteApi(
       "The OpenCensus project is deprecated. Use enableOpenTelemetryTraces to switch to OpenTelemetry traces")
+  @VisibleForTesting
   static void resetActiveTracingFramework() {
     activeTracingFramework = null;
   }
@@ -1558,9 +1680,104 @@ public class SpannerOptions extends ServiceOptions<Spanner, SpannerOptions> {
     }
   }
 
+  @Override
+  public ApiTracerFactory getApiTracerFactory() {
+    return createApiTracerFactory(false, false);
+  }
+
+  public ApiTracerFactory getApiTracerFactory(boolean isAdminClient, boolean isEmulatorEnabled) {
+    return createApiTracerFactory(isAdminClient, isEmulatorEnabled);
+  }
+
+  private ApiTracerFactory createApiTracerFactory(
+      boolean isAdminClient, boolean isEmulatorEnabled) {
+    List<ApiTracerFactory> apiTracerFactories = new ArrayList<>();
+    // Prefer any direct ApiTracerFactory that might have been set on the builder.
+    apiTracerFactories.add(
+        MoreObjects.firstNonNull(super.getApiTracerFactory(), getDefaultApiTracerFactory()));
+
+    // Add Metrics Tracer factory if built in metrics are enabled and if the client is data client
+    // and if emulator is not enabled.
+    if (isEnableBuiltInMetrics() && !isAdminClient && !isEmulatorEnabled) {
+      ApiTracerFactory metricsTracerFactory = createMetricsApiTracerFactory();
+      if (metricsTracerFactory != null) {
+        apiTracerFactories.add(metricsTracerFactory);
+      }
+    }
+
+    return new CompositeTracerFactory(apiTracerFactories);
+  }
+
+  private ApiTracerFactory getDefaultApiTracerFactory() {
+    if (isEnableApiTracing()) {
+      if (activeTracingFramework == TracingFramework.OPEN_TELEMETRY) {
+        return new OpenTelemetryApiTracerFactory(
+            getOpenTelemetry()
+                .getTracer(
+                    MetricRegistryConstants.INSTRUMENTATION_SCOPE,
+                    GaxProperties.getLibraryVersion(getClass())),
+            Attributes.empty());
+      } else if (activeTracingFramework == TracingFramework.OPEN_CENSUS) {
+        return new OpencensusTracerFactory();
+      }
+    }
+    return BaseApiTracerFactory.getInstance();
+  }
+
+  private ApiTracerFactory createMetricsApiTracerFactory() {
+    OpenTelemetry openTelemetry =
+        this.builtInOpenTelemetryMetricsProvider.getOrCreateOpenTelemetry(
+            this.getProjectId(), getCredentials());
+
+    return openTelemetry != null
+        ? new MetricsTracerFactory(
+            new OpenTelemetryMetricsRecorder(openTelemetry, BuiltInMetricsConstant.METER_NAME),
+            builtInOpenTelemetryMetricsProvider.createClientAttributes(
+                this.getProjectId(), "spanner-java/" + GaxProperties.getLibraryVersion(getClass())))
+        : null;
+  }
+
+  /**
+   * Returns true if an {@link com.google.api.gax.tracing.ApiTracer} should be created and set on
+   * the Spanner client. Enabling this only has effect if an OpenTelemetry or OpenCensus trace
+   * exporter has been configured.
+   */
+  public boolean isEnableApiTracing() {
+    return enableApiTracing;
+  }
+
+  /**
+   * Returns true if an {@link com.google.api.gax.tracing.MetricsTracer} should be created and set
+   * on the Spanner client.
+   */
+  public boolean isEnableBuiltInMetrics() {
+    return enableBuiltInMetrics;
+  }
+
   @BetaApi
   public boolean isUseVirtualThreads() {
     return useVirtualThreads;
+  }
+
+  /**
+   * Returns whether extended OpenTelemetry tracing is enabled. Enabling this option will add the
+   * following additional attributes to the traces that are generated by the client:
+   *
+   * <ul>
+   *   <li>db.statement: Contains the SQL statement that is being executed.
+   *   <li>thread.name: The name of the thread that executes the statement.
+   * </ul>
+   */
+  public boolean isEnableExtendedTracing() {
+    return enableExtendedTracing;
+  }
+
+  /**
+   * Returns whether end to end tracing is enabled. If this option is enabled then trace spans will
+   * be created at the Spanner layer.
+   */
+  public boolean isEndToEndTracingEnabled() {
+    return enableEndToEndTracing;
   }
 
   /** Returns the default query options to use for the specific database. */

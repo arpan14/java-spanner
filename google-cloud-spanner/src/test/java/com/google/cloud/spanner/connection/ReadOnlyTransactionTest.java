@@ -50,6 +50,7 @@ import com.google.cloud.spanner.connection.AbstractStatementParser.StatementType
 import com.google.cloud.spanner.connection.UnitOfWork.CallType;
 import com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState;
 import com.google.spanner.v1.ResultSetStats;
+import io.opentelemetry.api.trace.Span;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.List;
@@ -180,6 +181,7 @@ public class ReadOnlyTransactionTest {
         .setBatchClient(mock(BatchClient.class))
         .setReadOnlyStaleness(staleness)
         .withStatementExecutor(new StatementExecutor())
+        .setSpan(Span.getInvalid())
         .build();
   }
 
@@ -243,7 +245,7 @@ public class ReadOnlyTransactionTest {
   @Test
   public void testGetCommitTimestamp() {
     ReadOnlyTransaction transaction = createSubject();
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(transaction.getState(), is(UnitOfWorkState.COMMITTED));
     try {
       transaction.getCommitTimestamp();
@@ -256,7 +258,7 @@ public class ReadOnlyTransactionTest {
   @Test
   public void testGetCommitResponse() {
     ReadOnlyTransaction transaction = createSubject();
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     try {
       transaction.getCommitResponse();
       fail("expected FAILED_PRECONDITION");
@@ -268,7 +270,7 @@ public class ReadOnlyTransactionTest {
   @Test
   public void testGetCommitResponseOrNull() {
     ReadOnlyTransaction transaction = createSubject();
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertNull(transaction.getCommitResponseOrNull());
   }
 
@@ -320,6 +322,7 @@ public class ReadOnlyTransactionTest {
             .setBatchClient(mock(BatchClient.class))
             .setReadOnlyStaleness(TimestampBound.strong())
             .withStatementExecutor(new StatementExecutor())
+            .setSpan(Span.getInvalid())
             .build();
     ResultSet expectedWithOptions = DirectExecuteResultSet.ofResultSet(resWithOptions);
     assertThat(
@@ -427,7 +430,7 @@ public class ReadOnlyTransactionTest {
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.COMMITTED)));
@@ -446,7 +449,7 @@ public class ReadOnlyTransactionTest {
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
 
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.COMMITTED)));
@@ -458,7 +461,7 @@ public class ReadOnlyTransactionTest {
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
-    get(transaction.rollbackAsync(CallType.SYNC));
+    get(transaction.rollbackAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.ROLLED_BACK)));
@@ -476,7 +479,7 @@ public class ReadOnlyTransactionTest {
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
-    get(transaction.rollbackAsync(CallType.SYNC));
+    get(transaction.rollbackAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.ROLLED_BACK)));

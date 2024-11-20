@@ -20,7 +20,9 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
@@ -35,6 +37,7 @@ import com.google.cloud.grpc.GrpcTransportOptions;
 import com.google.cloud.grpc.GrpcTransportOptions.ExecutorFactory;
 import com.google.cloud.spanner.TransactionManager.TransactionState;
 import com.google.cloud.spanner.spi.v1.SpannerRpc;
+import com.google.cloud.spanner.v1.stub.SpannerStubSettings;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Empty;
 import com.google.spanner.v1.BeginTransactionRequest;
@@ -97,7 +100,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void beginCalledTwiceFails() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     assertThat(manager.begin()).isEqualTo(txn);
     assertThat(manager.getState()).isEqualTo(TransactionState.STARTED);
     IllegalStateException e = assertThrows(IllegalStateException.class, () -> manager.begin());
@@ -125,7 +128,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void transactionRolledBackOnClose() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     when(txn.isAborted()).thenReturn(false);
     manager.begin();
     manager.close();
@@ -134,7 +137,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void commitSucceeds() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     Timestamp commitTimestamp = Timestamp.ofTimeMicroseconds(1);
     CommitResponse response = new CommitResponse(commitTimestamp);
     when(txn.getCommitResponse()).thenReturn(response);
@@ -146,7 +149,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void resetAfterSuccessfulCommitFails() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     manager.begin();
     manager.commit();
     IllegalStateException e =
@@ -156,21 +159,21 @@ public class TransactionManagerImplTest {
 
   @Test
   public void resetAfterAbortSucceeds() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     manager.begin();
     doThrow(SpannerExceptionFactory.newSpannerException(ErrorCode.ABORTED, "")).when(txn).commit();
     assertThrows(AbortedException.class, () -> manager.commit());
     assertEquals(TransactionState.ABORTED, manager.getState());
 
     txn = Mockito.mock(TransactionRunnerImpl.TransactionContextImpl.class);
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     assertThat(manager.resetForRetry()).isEqualTo(txn);
     assertThat(manager.getState()).isEqualTo(TransactionState.STARTED);
   }
 
   @Test
   public void resetAfterErrorFails() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     manager.begin();
     doThrow(SpannerExceptionFactory.newSpannerException(ErrorCode.UNKNOWN, "")).when(txn).commit();
     SpannerException e = assertThrows(SpannerException.class, () -> manager.commit());
@@ -183,7 +186,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void rollbackAfterCommitFails() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     manager.begin();
     manager.commit();
     IllegalStateException e = assertThrows(IllegalStateException.class, () -> manager.rollback());
@@ -192,7 +195,7 @@ public class TransactionManagerImplTest {
 
   @Test
   public void commitAfterRollbackFails() {
-    when(session.newTransaction(Options.fromTransactionOptions())).thenReturn(txn);
+    when(session.newTransaction(eq(Options.fromTransactionOptions()), any())).thenReturn(txn);
     manager.begin();
     manager.rollback();
     IllegalStateException e = assertThrows(IllegalStateException.class, () -> manager.commit());
@@ -248,6 +251,8 @@ public class TransactionManagerImplTest {
                             com.google.protobuf.Timestamp.newBuilder()
                                 .setSeconds(System.currentTimeMillis() * 1000))
                         .build()));
+    when(rpc.getCommitRetrySettings())
+        .thenReturn(SpannerStubSettings.newBuilder().commitSettings().getRetrySettings());
     DatabaseId db = DatabaseId.of("test", "test", "test");
     try (SpannerImpl spanner = new SpannerImpl(rpc, options)) {
       DatabaseClient client = spanner.getDatabaseClient(db);
@@ -332,6 +337,8 @@ public class TransactionManagerImplTest {
                             com.google.protobuf.Timestamp.newBuilder()
                                 .setSeconds(System.currentTimeMillis() * 1000))
                         .build()));
+    when(rpc.getCommitRetrySettings())
+        .thenReturn(SpannerStubSettings.newBuilder().commitSettings().getRetrySettings());
     DatabaseId db = DatabaseId.of("test", "test", "test");
     try (SpannerImpl spanner = new SpannerImpl(rpc, options)) {
       DatabaseClient client = spanner.getDatabaseClient(db);
@@ -357,5 +364,62 @@ public class TransactionManagerImplTest {
       // But only 1 with a BeginTransaction.
       assertThat(transactionsStarted.get()).isEqualTo(1);
     }
+  }
+
+  // This test ensures that when a transaction is aborted in a multiplexed session,
+  // the transaction ID of the aborted transaction is saved during the retry when a new transaction
+  // is created.
+  @Test
+  public void storePreviousTxnIdOnAbortForMultiplexedSession() {
+    txn = Mockito.mock(TransactionRunnerImpl.TransactionContextImpl.class);
+    final ByteString mockTransactionId = ByteString.copyFromUtf8("mockTransactionId");
+    txn.transactionId = mockTransactionId;
+    when(session.newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY))
+        .thenReturn(txn);
+    manager.begin();
+    // Verify that for the first transaction attempt, the `previousTransactionId` is
+    // ByteString.EMPTY.
+    // This is because no transaction has been previously aborted at this point.
+    verify(session).newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY);
+    doThrow(SpannerExceptionFactory.newSpannerException(ErrorCode.ABORTED, "")).when(txn).commit();
+    assertThrows(AbortedException.class, () -> manager.commit());
+
+    txn = Mockito.mock(TransactionRunnerImpl.TransactionContextImpl.class);
+    when(txn.getPreviousTransactionId()).thenReturn(mockTransactionId);
+    when(session.newTransaction(Options.fromTransactionOptions(), mockTransactionId))
+        .thenReturn(txn);
+    when(session.getIsMultiplexed()).thenReturn(true);
+    assertThat(manager.resetForRetry()).isEqualTo(txn);
+    // Verify that in the first retry attempt, the `previousTransactionId` is passed to the new
+    // transaction.
+    // This allows Spanner to retry the transaction using the ID of the aborted transaction.
+    verify(session).newTransaction(Options.fromTransactionOptions(), mockTransactionId);
+  }
+
+  // This test ensures that when a transaction is aborted in a regular session,
+  // the transaction ID of the aborted transaction is not saved during the retry when a new
+  // transaction is created.
+  @Test
+  public void skipTxnIdStorageOnAbortForRegularSession() {
+    txn = Mockito.mock(TransactionRunnerImpl.TransactionContextImpl.class);
+    final ByteString mockTransactionId = ByteString.copyFromUtf8("mockTransactionId");
+    txn.transactionId = mockTransactionId;
+    when(session.newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY))
+        .thenReturn(txn);
+    manager.begin();
+    verify(session).newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY);
+    doThrow(SpannerExceptionFactory.newSpannerException(ErrorCode.ABORTED, "")).when(txn).commit();
+    assertThrows(AbortedException.class, () -> manager.commit());
+    clearInvocations(session);
+
+    txn = Mockito.mock(TransactionRunnerImpl.TransactionContextImpl.class);
+    when(session.newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY))
+        .thenReturn(txn);
+    when(session.getIsMultiplexed()).thenReturn(false);
+    assertThat(manager.resetForRetry()).isEqualTo(txn);
+    // Verify that in the first retry attempt, the `previousTransactionId` is not passed to the new
+    // transaction
+    // in case of regular sessions.
+    verify(session).newTransaction(Options.fromTransactionOptions(), ByteString.EMPTY);
   }
 }

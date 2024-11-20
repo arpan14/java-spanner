@@ -323,6 +323,27 @@ public class ConnectionOptionsTest {
   }
 
   @Test
+  public void testBuildWithEndToEndTracingEnabled() {
+    final String BASE_URI =
+        "cloudspanner:/projects/test-project-123/instances/test-instance-123/databases/test-database-123";
+    ConnectionOptions.Builder builder = ConnectionOptions.newBuilder();
+    builder.setUri(BASE_URI + "?enableEndToEndTracing=true");
+    builder.setCredentialsUrl(FILE_TEST_PATH);
+    ConnectionOptions options = builder.build();
+    assertEquals(options.getHost(), DEFAULT_HOST);
+    assertEquals(options.getProjectId(), TEST_PROJECT);
+    assertEquals(options.getInstanceId(), TEST_INSTANCE);
+    assertEquals(options.getDatabaseName(), TEST_DATABASE);
+    assertTrue(options.isEndToEndTracingEnabled());
+
+    // Test for default behavior for enableEndToEndTracing property.
+    builder = ConnectionOptions.newBuilder().setUri(BASE_URI);
+    builder.setCredentialsUrl(FILE_TEST_PATH);
+    options = builder.build();
+    assertFalse(options.isEndToEndTracingEnabled());
+  }
+
+  @Test
   public void testBuildWithAutoConfigEmulatorAndHost() {
     ConnectionOptions.Builder builder = ConnectionOptions.newBuilder();
     builder.setUri(
@@ -1164,5 +1185,30 @@ public class ConnectionOptionsTest {
             .setCredentials(NoCredentials.getInstance())
             .build()
             .getMaxCommitDelay());
+  }
+
+  @Test
+  public void testEnableApiTracing() {
+    assertNull(
+        ConnectionOptions.newBuilder()
+            .setUri(
+                "cloudspanner:/projects/test-project-123/instances/test-instance/databases/test-database")
+            .setCredentials(NoCredentials.getInstance())
+            .build()
+            .isEnableApiTracing());
+    assertTrue(
+        ConnectionOptions.newBuilder()
+            .setUri(
+                "cloudspanner:/projects/test-project-123/instances/test-instance/databases/test-database?enableApiTracing=true")
+            .setCredentials(NoCredentials.getInstance())
+            .build()
+            .isEnableApiTracing());
+    assertFalse(
+        ConnectionOptions.newBuilder()
+            .setUri(
+                "cloudspanner:/projects/test-project-123/instances/test-instance/databases/test-database?enableApiTracing=false")
+            .setCredentials(NoCredentials.getInstance())
+            .build()
+            .isEnableApiTracing());
   }
 }

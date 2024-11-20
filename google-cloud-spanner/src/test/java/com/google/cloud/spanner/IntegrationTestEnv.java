@@ -17,6 +17,7 @@
 package com.google.cloud.spanner;
 
 import static com.google.common.base.Preconditions.checkState;
+import static org.junit.Assume.assumeFalse;
 
 import com.google.api.client.util.ExponentialBackOff;
 import com.google.api.gax.longrunning.OperationFuture;
@@ -26,6 +27,7 @@ import com.google.cloud.spanner.testing.EmulatorSpannerHelper;
 import com.google.cloud.spanner.testing.RemoteSpannerHelper;
 import com.google.common.collect.Iterators;
 import com.google.spanner.admin.instance.v1.CreateInstanceMetadata;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -85,13 +87,25 @@ public class IntegrationTestEnv extends ExternalResource {
       throw new NullPointerException("Property " + TEST_ENV_CONFIG_CLASS_NAME + " needs to be set");
     }
     Class<? extends TestEnvConfig> configClass;
+    if (EmulatorSpannerHelper.isUsingEmulator()) {
+      // Make sure that we use an owned instance on the emulator.
+      System.setProperty(TEST_INSTANCE_PROPERTY, "");
+    }
     configClass = (Class<? extends TestEnvConfig>) Class.forName(CONFIG_CLASS);
     config = configClass.newInstance();
+  }
+
+  boolean isCloudDevel() {
+    return Objects.equals(
+        System.getProperty("spanner.gce.config.server_url"),
+        "https://staging-wrenchworks.sandbox.googleapis.com");
   }
 
   @Override
   protected void before() throws Throwable {
     this.initializeConfig();
+    assumeFalse(alwaysCreateNewInstance && isCloudDevel());
+
     this.config.setUp();
 
     SpannerOptions options = config.spannerOptions();
@@ -133,7 +147,7 @@ public class IntegrationTestEnv extends ExternalResource {
   private void initializeInstance(InstanceId instanceId) throws Exception {
     InstanceConfig instanceConfig;
     try {
-      instanceConfig = instanceAdminClient.getInstanceConfig("regional-us-central1");
+      instanceConfig = instanceAdminClient.getInstanceConfig("regional-us-east4");
     } catch (Throwable ignore) {
       instanceConfig =
           Iterators.get(instanceAdminClient.listInstanceConfigs().iterateAll().iterator(), 0, null);
@@ -146,6 +160,7 @@ public class IntegrationTestEnv extends ExternalResource {
         InstanceInfo.newBuilder(instanceId)
             .setNodeCount(1)
             .setDisplayName("Test instance")
+            .setEdition(com.google.spanner.admin.instance.v1.Instance.Edition.ENTERPRISE_PLUS)
             .setInstanceConfigId(configId)
             .build();
     OperationFuture<Instance, CreateInstanceMetadata> op =

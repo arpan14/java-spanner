@@ -25,6 +25,7 @@ import com.google.cloud.spanner.BatchReadOnlyTransaction;
 import com.google.cloud.spanner.BatchTransactionId;
 import com.google.cloud.spanner.Dialect;
 import com.google.cloud.spanner.ErrorCode;
+import com.google.cloud.spanner.OpenTelemetryContextKeys;
 import com.google.cloud.spanner.Options.QueryOption;
 import com.google.cloud.spanner.Options.RpcPriority;
 import com.google.cloud.spanner.Partition;
@@ -45,6 +46,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 import io.grpc.Context;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Scope;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -63,10 +67,17 @@ import javax.annotation.concurrent.GuardedBy;
 
 /** Base for all {@link Connection}-based transactions and batches. */
 abstract class AbstractBaseUnitOfWork implements UnitOfWork {
+  static final String DB_STATEMENT = "db.statement";
+  static final AttributeKey<String> DB_STATEMENT_KEY = AttributeKey.stringKey(DB_STATEMENT);
+  static final AttributeKey<List<String>> DB_STATEMENT_ARRAY_KEY =
+      AttributeKey.stringArrayKey(DB_STATEMENT);
+
   private final StatementExecutor statementExecutor;
   private final StatementTimeout statementTimeout;
   protected final String transactionTag;
+  protected final boolean excludeTxnFromChangeStreams;
   protected final RpcPriority rpcPriority;
+  protected final Span span;
 
   /** Class for keeping track of the stacktrace of the caller of an async statement. */
   static final class SpannerAsyncExecutionException extends RuntimeException {
@@ -99,7 +110,10 @@ abstract class AbstractBaseUnitOfWork implements UnitOfWork {
     private StatementExecutor statementExecutor;
     private StatementTimeout statementTimeout = new StatementTimeout();
     private String transactionTag;
+
+    private boolean excludeTxnFromChangeStreams;
     private RpcPriority rpcPriority;
+    private Span span;
 
     Builder() {}
 
@@ -125,8 +139,18 @@ abstract class AbstractBaseUnitOfWork implements UnitOfWork {
       return self();
     }
 
+    B setExcludeTxnFromChangeStreams(boolean excludeTxnFromChangeStreams) {
+      this.excludeTxnFromChangeStreams = excludeTxnFromChangeStreams;
+      return self();
+    }
+
     B setRpcPriority(@Nullable RpcPriority rpcPriority) {
       this.rpcPriority = rpcPriority;
+      return self();
+    }
+
+    B setSpan(@Nullable Span span) {
+      this.span = span;
       return self();
     }
 
@@ -138,7 +162,25 @@ abstract class AbstractBaseUnitOfWork implements UnitOfWork {
     this.statementExecutor = builder.statementExecutor;
     this.statementTimeout = builder.statementTimeout;
     this.transactionTag = builder.transactionTag;
+    this.excludeTxnFromChangeStreams = builder.excludeTxnFromChangeStreams;
     this.rpcPriority = builder.rpcPriority;
+    this.span = Preconditions.checkNotNull(builder.span);
+  }
+
+  @Override
+  public Span getSpan() {
+    return this.span;
+  }
+
+  ApiFuture<Void> asyncEndUnitOfWorkSpan() {
+    return this.statementExecutor.submit(this::endUnitOfWorkSpan);
+  }
+
+  private Void endUnitOfWorkSpan() {
+    if (this.span != null) {
+      this.span.end();
+    }
+    return null;
   }
 
   /**
@@ -318,37 +360,47 @@ abstract class AbstractBaseUnitOfWork implements UnitOfWork {
                 }
               });
     }
-    ApiFuture<T> f = statementExecutor.submit(context.wrap(callable));
-    final SpannerAsyncExecutionException caller =
-        callType == CallType.ASYNC
-            ? new SpannerAsyncExecutionException(statement.getStatement())
-            : null;
-    final ApiFuture<T> future =
-        ApiFutures.catching(
-            f,
-            Throwable.class,
-            input -> {
-              if (caller != null) {
-                input.addSuppressed(caller);
+    // Register the name of the thread that called this method as the thread name that should be
+    // traced.
+    try (Scope ignore =
+        io.opentelemetry.context.Context.current()
+            .with(OpenTelemetryContextKeys.THREAD_NAME_KEY, Thread.currentThread().getName())
+            .makeCurrent()) {
+      ApiFuture<T> f = statementExecutor.submit(context.wrap(callable));
+      final SpannerAsyncExecutionException caller =
+          callType == CallType.ASYNC
+              ? new SpannerAsyncExecutionException(statement.getStatement())
+              : null;
+      final ApiFuture<T> future =
+          ApiFutures.catching(
+              f,
+              Throwable.class,
+              input -> {
+                if (caller != null) {
+                  input.addSuppressed(caller);
+                }
+                throw SpannerExceptionFactory.asSpannerException(input);
+              },
+              MoreExecutors.directExecutor());
+      synchronized (this) {
+        this.currentlyRunningStatementFuture = future;
+      }
+      future.addListener(
+          new Runnable() {
+            @Override
+            public void run() {
+              synchronized (this) {
+                if (currentlyRunningStatementFuture == future) {
+                  currentlyRunningStatementFuture = null;
+                }
               }
-              throw SpannerExceptionFactory.asSpannerException(input);
-            },
-            MoreExecutors.directExecutor());
-    synchronized (this) {
-      this.currentlyRunningStatementFuture = future;
-    }
-    future.addListener(
-        new Runnable() {
-          @Override
-          public void run() {
-            synchronized (this) {
-              if (currentlyRunningStatementFuture == future) {
-                currentlyRunningStatementFuture = null;
+              if (isSingleUse()) {
+                endUnitOfWorkSpan();
               }
             }
-          }
-        },
-        MoreExecutors.directExecutor());
-    return future;
+          },
+          MoreExecutors.directExecutor());
+      return future;
+    }
   }
 }

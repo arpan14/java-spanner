@@ -23,6 +23,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.api.client.util.BackOff;
 import com.google.api.client.util.ExponentialBackOff;
+import com.google.api.core.InternalApi;
 import com.google.api.gax.grpc.GrpcStatusCode;
 import com.google.api.gax.retrying.RetrySettings;
 import com.google.api.gax.rpc.StatusCode.Code;
@@ -34,6 +35,7 @@ import com.google.common.collect.AbstractIterator;
 import com.google.protobuf.ByteString;
 import com.google.spanner.v1.PartialResultSet;
 import io.grpc.Context;
+import io.opentelemetry.api.common.Attributes;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.Objects;
@@ -56,10 +58,12 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
     implements CloseableIterator<PartialResultSet> {
   private static final RetrySettings DEFAULT_STREAMING_RETRY_SETTINGS =
       SpannerStubSettings.newBuilder().executeStreamingSqlSettings().getRetrySettings();
+  private final ErrorHandler errorHandler;
+  private AsyncResultSet.StreamMessageListener streamMessageListener;
   private final RetrySettings streamingRetrySettings;
   private final Set<Code> retryableCodes;
   private static final Logger logger = Logger.getLogger(ResumableStreamIterator.class.getName());
-  private final BackOff backOff;
+  private BackOff backOff;
   private final LinkedList<PartialResultSet> buffer = new LinkedList<>();
   private final int maxBufferSize;
   private final ISpan span;
@@ -79,15 +83,36 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
       String streamName,
       ISpan parent,
       TraceWrapper tracer,
+      ErrorHandler errorHandler,
+      RetrySettings streamingRetrySettings,
+      Set<Code> retryableCodes) {
+    this(
+        maxBufferSize,
+        streamName,
+        parent,
+        tracer,
+        Attributes.empty(),
+        errorHandler,
+        streamingRetrySettings,
+        retryableCodes);
+  }
+
+  protected ResumableStreamIterator(
+      int maxBufferSize,
+      String streamName,
+      ISpan parent,
+      TraceWrapper tracer,
+      Attributes attributes,
+      ErrorHandler errorHandler,
       RetrySettings streamingRetrySettings,
       Set<Code> retryableCodes) {
     checkArgument(maxBufferSize >= 0);
     this.maxBufferSize = maxBufferSize;
     this.tracer = tracer;
-    this.span = tracer.spanBuilderWithExplicitParent(streamName, parent);
+    this.span = tracer.spanBuilderWithExplicitParent(streamName, parent, attributes);
+    this.errorHandler = errorHandler;
     this.streamingRetrySettings = Preconditions.checkNotNull(streamingRetrySettings);
     this.retryableCodes = Preconditions.checkNotNull(retryableCodes);
-    this.backOff = newBackOff();
   }
 
   private ExponentialBackOff newBackOff() {
@@ -173,7 +198,16 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
     }
   }
 
-  abstract CloseableIterator<PartialResultSet> startStream(@Nullable ByteString resumeToken);
+  abstract CloseableIterator<PartialResultSet> startStream(
+      @Nullable ByteString resumeToken, AsyncResultSet.StreamMessageListener streamMessageListener);
+
+  /**
+   * Prepares the iterator for a retry on a different gRPC channel. Returns true if that is
+   * possible, and false otherwise. A retry should only be attempted if the method returns true.
+   */
+  boolean prepareIteratorForRetryOnDifferentGrpcChannel() {
+    return false;
+  }
 
   @Override
   public void close(@Nullable String message) {
@@ -190,21 +224,20 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
   }
 
   @Override
+  @InternalApi
+  public boolean initiateStreaming(AsyncResultSet.StreamMessageListener streamMessageListener) {
+    this.streamMessageListener = streamMessageListener;
+    startGrpcStreaming();
+    return true;
+  }
+
+  @Override
   protected PartialResultSet computeNext() {
+    int numAttemptsOnOtherChannel = 0;
     Context context = Context.current();
     while (true) {
       // Eagerly start stream before consuming any buffered items.
-      if (stream == null) {
-        span.addAnnotation(
-            "Starting/Resuming stream",
-            "ResumeToken",
-            resumeToken == null ? "null" : resumeToken.toStringUtf8());
-        try (IScope scope = tracer.withSpan(span)) {
-          // When start a new stream set the Span as current to make the gRPC Span a child of
-          // this Span.
-          stream = checkNotNull(startStream(resumeToken));
-        }
-      }
+      startGrpcStreaming();
       // Buffer contains items up to a resume token or has reached capacity: flush.
       if (!buffer.isEmpty()
           && (finished || !safeToRetry || !buffer.getLast().getResumeToken().isEmpty())) {
@@ -252,11 +285,25 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
             if (delay != -1) {
               backoffSleep(context, delay);
             } else {
-              backoffSleep(context, backOff);
+              if (this.backOff == null) {
+                this.backOff = newBackOff();
+              }
+              backoffSleep(context, this.backOff);
             }
           }
 
           continue;
+        }
+        // Check if we should retry the request on a different gRPC channel.
+        if (resumeToken == null && buffer.isEmpty()) {
+          Throwable translated = errorHandler.translateException(spannerException);
+          if (translated instanceof RetryOnDifferentGrpcChannelException) {
+            if (++numAttemptsOnOtherChannel < errorHandler.getMaxAttempts()
+                && prepareIteratorForRetryOnDifferentGrpcChannel()) {
+              stream = null;
+              continue;
+            }
+          }
         }
         span.addAnnotation("Stream broken. Not safe to retry", spannerException);
         span.setStatus(spannerException);
@@ -265,6 +312,20 @@ abstract class ResumableStreamIterator extends AbstractIterator<PartialResultSet
         span.addAnnotation("Stream broken. Not safe to retry", e);
         span.setStatus(e);
         throw e;
+      }
+    }
+  }
+
+  private void startGrpcStreaming() {
+    if (stream == null) {
+      span.addAnnotation(
+          "Starting/Resuming stream",
+          "ResumeToken",
+          resumeToken == null ? "null" : resumeToken.toStringUtf8());
+      try (IScope scope = tracer.withSpan(span)) {
+        // When start a new stream set the Span as current to make the gRPC Span a child of
+        // this Span.
+        stream = checkNotNull(startStream(resumeToken, streamMessageListener));
       }
     }
   }

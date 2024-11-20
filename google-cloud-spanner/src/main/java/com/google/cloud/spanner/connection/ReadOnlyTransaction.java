@@ -17,7 +17,6 @@
 package com.google.cloud.spanner.connection;
 
 import com.google.api.core.ApiFuture;
-import com.google.api.core.ApiFutures;
 import com.google.cloud.Timestamp;
 import com.google.cloud.spanner.BatchClient;
 import com.google.cloud.spanner.BatchReadOnlyTransaction;
@@ -38,7 +37,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.spanner.v1.SpannerGrpc;
+import io.opentelemetry.context.Scope;
 import java.util.concurrent.Callable;
+import javax.annotation.Nonnull;
 
 /**
  * Transaction that is used when a {@link Connection} is in read-only mode or when the transaction
@@ -186,21 +187,23 @@ class ReadOnlyTransaction extends AbstractMultiUseTransaction {
     // statement in the transaction is to partition a query.
     // Using a batch-read-only transaction for every read-only transaction is not efficient, as
     // these transactions use a session that is created synchronously only for this transaction.
-    if (transaction == null) {
-      batchReadOnlyTransaction = batchClient.batchReadOnlyTransaction(readOnlyStaleness);
-      transaction = batchReadOnlyTransaction;
-    } else if (batchReadOnlyTransaction == null) {
-      batchReadOnlyTransaction =
-          batchClient.batchReadOnlyTransaction(
-              TimestampBound.ofReadTimestamp(transaction.getReadTimestamp()));
+    try (Scope ignore = span.makeCurrent()) {
+      if (transaction == null) {
+        batchReadOnlyTransaction = batchClient.batchReadOnlyTransaction(readOnlyStaleness);
+        transaction = batchReadOnlyTransaction;
+      } else if (batchReadOnlyTransaction == null) {
+        batchReadOnlyTransaction =
+            batchClient.batchReadOnlyTransaction(
+                TimestampBound.ofReadTimestamp(transaction.getReadTimestamp()));
+      }
+      Callable<ResultSet> callable =
+          () -> partitionQuery(batchReadOnlyTransaction, partitionOptions, query, options);
+      return executeStatementAsync(
+          callType,
+          query,
+          callable,
+          ImmutableList.of(SpannerGrpc.getExecuteSqlMethod(), SpannerGrpc.getCommitMethod()));
     }
-    Callable<ResultSet> callable =
-        () -> partitionQuery(batchReadOnlyTransaction, partitionOptions, query, options);
-    return executeStatementAsync(
-        callType,
-        query,
-        callable,
-        ImmutableList.of(SpannerGrpc.getExecuteSqlMethod(), SpannerGrpc.getCommitMethod()));
   }
 
   @Override
@@ -239,26 +242,41 @@ class ReadOnlyTransaction extends AbstractMultiUseTransaction {
   }
 
   @Override
-  public ApiFuture<Void> commitAsync(CallType callType) {
-    closeTransactions();
-    this.state = UnitOfWorkState.COMMITTED;
-    return ApiFutures.immediateFuture(null);
+  public ApiFuture<Void> commitAsync(
+      @Nonnull CallType callType, @Nonnull EndTransactionCallback callback) {
+    try (Scope ignore = span.makeCurrent()) {
+      ApiFuture<Void> result = closeTransactions();
+      callback.onSuccess();
+      this.state = UnitOfWorkState.COMMITTED;
+      return result;
+    } catch (Throwable throwable) {
+      callback.onFailure();
+      throw throwable;
+    }
   }
 
   @Override
-  public ApiFuture<Void> rollbackAsync(CallType callType) {
-    closeTransactions();
-    this.state = UnitOfWorkState.ROLLED_BACK;
-    return ApiFutures.immediateFuture(null);
+  public ApiFuture<Void> rollbackAsync(
+      @Nonnull CallType callType, @Nonnull EndTransactionCallback callback) {
+    try (Scope ignore = span.makeCurrent()) {
+      ApiFuture<Void> result = closeTransactions();
+      callback.onSuccess();
+      this.state = UnitOfWorkState.ROLLED_BACK;
+      return result;
+    } catch (Throwable throwable) {
+      callback.onFailure();
+      throw throwable;
+    }
   }
 
-  private void closeTransactions() {
+  private ApiFuture<Void> closeTransactions() {
     if (this.transaction != null) {
       this.transaction.close();
     }
     if (this.batchReadOnlyTransaction != null) {
       this.batchReadOnlyTransaction.close();
     }
+    return asyncEndUnitOfWorkSpan();
   }
 
   @Override

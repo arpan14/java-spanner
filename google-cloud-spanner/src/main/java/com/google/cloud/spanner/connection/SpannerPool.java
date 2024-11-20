@@ -158,6 +158,9 @@ public class SpannerPool {
     private final boolean routeToLeader;
     private final boolean useVirtualGrpcTransportThreads;
     private final OpenTelemetry openTelemetry;
+    private final Boolean enableExtendedTracing;
+    private final Boolean enableApiTracing;
+    private final boolean enableEndToEndTracing;
 
     @VisibleForTesting
     static SpannerPoolKey of(ConnectionOptions options) {
@@ -186,6 +189,9 @@ public class SpannerPool {
       this.routeToLeader = options.isRouteToLeader();
       this.useVirtualGrpcTransportThreads = options.isUseVirtualGrpcTransportThreads();
       this.openTelemetry = options.getOpenTelemetry();
+      this.enableExtendedTracing = options.isEnableExtendedTracing();
+      this.enableApiTracing = options.isEnableApiTracing();
+      this.enableEndToEndTracing = options.isEndToEndTracingEnabled();
     }
 
     @Override
@@ -205,7 +211,10 @@ public class SpannerPool {
           && Objects.equals(this.routeToLeader, other.routeToLeader)
           && Objects.equals(
               this.useVirtualGrpcTransportThreads, other.useVirtualGrpcTransportThreads)
-          && Objects.equals(this.openTelemetry, other.openTelemetry);
+          && Objects.equals(this.openTelemetry, other.openTelemetry)
+          && Objects.equals(this.enableExtendedTracing, other.enableExtendedTracing)
+          && Objects.equals(this.enableApiTracing, other.enableApiTracing)
+          && Objects.equals(this.enableEndToEndTracing, other.enableEndToEndTracing);
     }
 
     @Override
@@ -221,7 +230,10 @@ public class SpannerPool {
           this.userAgent,
           this.routeToLeader,
           this.useVirtualGrpcTransportThreads,
-          this.openTelemetry);
+          this.openTelemetry,
+          this.enableExtendedTracing,
+          this.enableApiTracing,
+          this.enableEndToEndTracing);
     }
   }
 
@@ -357,6 +369,12 @@ public class SpannerPool {
     if (key.openTelemetry != null) {
       builder.setOpenTelemetry(key.openTelemetry);
     }
+    if (key.enableExtendedTracing != null) {
+      builder.setEnableExtendedTracing(key.enableExtendedTracing);
+    }
+    if (key.enableApiTracing != null) {
+      builder.setEnableApiTracing(key.enableApiTracing);
+    }
     if (key.numChannels != null) {
       builder.setNumChannels(key.numChannels);
     }
@@ -365,6 +383,9 @@ public class SpannerPool {
     }
     if (!options.isRouteToLeader()) {
       builder.disableLeaderAwareRouting();
+    }
+    if (options.isEndToEndTracingEnabled()) {
+      builder.setEnableEndToEndTracing(true);
     }
     if (key.usePlainText) {
       // Credentials may not be sent over a plain text channel.

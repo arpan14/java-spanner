@@ -16,12 +16,12 @@
 
 package com.google.cloud.spanner.connection;
 
+import com.google.cloud.spanner.Options.RpcPriority;
 import com.google.cloud.spanner.Statement;
 import com.google.cloud.spanner.TimestampBound;
 import com.google.cloud.spanner.connection.PgTransactionMode.IsolationLevel;
-import com.google.protobuf.Duration;
 import com.google.spanner.v1.DirectedReadOptions;
-import com.google.spanner.v1.RequestOptions.Priority;
+import java.time.Duration;
 
 /**
  * The Cloud Spanner JDBC driver supports a number of client side statements that are interpreted by
@@ -91,6 +91,10 @@ interface ConnectionStatementExecutor {
 
   StatementResult statementShowDelayTransactionStartUntilFirstWrite();
 
+  StatementResult statementSetKeepTransactionAlive(Boolean keepTransactionAlive);
+
+  StatementResult statementShowKeepTransactionAlive();
+
   StatementResult statementSetStatementTag(String tag);
 
   StatementResult statementShowStatementTag();
@@ -98,6 +102,10 @@ interface ConnectionStatementExecutor {
   StatementResult statementSetTransactionTag(String tag);
 
   StatementResult statementShowTransactionTag();
+
+  StatementResult statementSetExcludeTxnFromChangeStreams(Boolean excludeTxnFromChangeStreams);
+
+  StatementResult statementShowExcludeTxnFromChangeStreams();
 
   StatementResult statementBeginTransaction();
 
@@ -124,7 +132,9 @@ interface ConnectionStatementExecutor {
 
   StatementResult statementAbortBatch();
 
-  StatementResult statementSetRPCPriority(Priority priority);
+  StatementResult statementResetAll();
+
+  StatementResult statementSetRPCPriority(RpcPriority priority);
 
   StatementResult statementShowRPCPriority();
 
@@ -133,6 +143,14 @@ interface ConnectionStatementExecutor {
   StatementResult statementShowSavepointSupport();
 
   StatementResult statementShowTransactionIsolationLevel();
+
+  StatementResult statementSetProtoDescriptors(byte[] protoDescriptors);
+
+  StatementResult statementSetProtoDescriptorsFilePath(String filePath);
+
+  StatementResult statementShowProtoDescriptors();
+
+  StatementResult statementShowProtoDescriptorsFilePath();
 
   StatementResult statementExplain(String sql);
 
@@ -157,4 +175,16 @@ interface ConnectionStatementExecutor {
   StatementResult statementRunPartition(String partitionId);
 
   StatementResult statementRunPartitionedQuery(Statement statement);
+
+  StatementResult statementSetAutoBatchDml(Boolean autoBatchDml);
+
+  StatementResult statementShowAutoBatchDml();
+
+  StatementResult statementSetAutoBatchDmlUpdateCount(Long updateCount);
+
+  StatementResult statementShowAutoBatchDmlUpdateCount();
+
+  StatementResult statementSetAutoBatchDmlUpdateCountVerification(Boolean verification);
+
+  StatementResult statementShowAutoBatchDmlUpdateCountVerification();
 }

@@ -62,6 +62,7 @@ import com.google.spanner.v1.ResultSetStats;
 import io.grpc.Metadata;
 import io.grpc.StatusRuntimeException;
 import io.grpc.protobuf.ProtoUtils;
+import io.opentelemetry.api.trace.Span;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
@@ -176,6 +177,7 @@ public class ReadWriteTransactionTest {
         .setSavepointSupport(SavepointSupport.FAIL_AFTER_ROLLBACK)
         .setTransactionRetryListeners(Collections.emptyList())
         .withStatementExecutor(new StatementExecutor())
+        .setSpan(Span.getInvalid())
         .build();
   }
 
@@ -306,7 +308,7 @@ public class ReadWriteTransactionTest {
 
     ReadWriteTransaction transaction = createSubject();
     assertThat(get(transaction.executeUpdateAsync(CallType.SYNC, parsedStatement)), is(1L));
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
 
     assertThat(transaction.getCommitTimestamp(), is(notNullValue()));
   }
@@ -352,7 +354,7 @@ public class ReadWriteTransactionTest {
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
 
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.COMMITTED)));
@@ -364,7 +366,7 @@ public class ReadWriteTransactionTest {
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
-    get(transaction.rollbackAsync(CallType.SYNC));
+    get(transaction.rollbackAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.ROLLED_BACK)));
@@ -377,7 +379,7 @@ public class ReadWriteTransactionTest {
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
     try {
-      get(transaction.commitAsync(CallType.SYNC));
+      get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     } catch (SpannerException e) {
       // ignore
     }
@@ -393,7 +395,7 @@ public class ReadWriteTransactionTest {
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
     try {
-      get(transaction.commitAsync(CallType.SYNC));
+      get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     } catch (AbortedException e) {
       // ignore
     }
@@ -409,7 +411,7 @@ public class ReadWriteTransactionTest {
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.STARTED)));
     assertThat(transaction.isActive(), is(true));
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
     assertThat(
         transaction.getState(),
         is(equalTo(com.google.cloud.spanner.connection.UnitOfWork.UnitOfWorkState.COMMITTED)));
@@ -475,12 +477,13 @@ public class ReadWriteTransactionTest {
               .setTransactionRetryListeners(Collections.emptyList())
               .setDatabaseClient(client)
               .withStatementExecutor(new StatementExecutor())
+              .setSpan(Span.getInvalid())
               .build();
       subject.executeUpdateAsync(CallType.SYNC, update1);
       subject.executeUpdateAsync(CallType.SYNC, update2);
       boolean expectedException = false;
       try {
-        get(subject.commitAsync(CallType.SYNC));
+        get(subject.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
       } catch (SpannerException e) {
         if (results == RetryResults.DIFFERENT && e.getErrorCode() == ErrorCode.ABORTED) {
           // expected
@@ -503,6 +506,7 @@ public class ReadWriteTransactionTest {
             .setTransactionRetryListeners(Collections.emptyList())
             .setDatabaseClient(client)
             .withStatementExecutor(new StatementExecutor())
+            .setSpan(Span.getInvalid())
             .build();
     ParsedStatement parsedStatement = mock(ParsedStatement.class);
     Statement statement = Statement.of("SELECT * FROM FOO");
@@ -737,6 +741,7 @@ public class ReadWriteTransactionTest {
             .setTransactionRetryListeners(Collections.emptyList())
             .setDatabaseClient(client)
             .withStatementExecutor(new StatementExecutor())
+            .setSpan(Span.getInvalid())
             .build();
     ParsedStatement parsedStatement = mock(ParsedStatement.class);
     Statement statement = Statement.of("SELECT * FROM FOO");
@@ -821,7 +826,7 @@ public class ReadWriteTransactionTest {
 
     ReadWriteTransaction transaction = createSubject();
     get(transaction.executeUpdateAsync(CallType.SYNC, parsedStatement));
-    get(transaction.commitAsync(CallType.SYNC));
+    get(transaction.commitAsync(CallType.SYNC, NoopEndTransactionCallback.INSTANCE));
 
     assertNotNull(transaction.getCommitResponse());
     assertNotNull(transaction.getCommitResponseOrNull());

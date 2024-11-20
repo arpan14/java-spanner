@@ -50,6 +50,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.annotation.Nullable;
@@ -62,11 +63,12 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
   final TraceWrapper tracer =
       new TraceWrapper(
           Tracing.getTracer(),
-          this.getOptions()
+          getOptions()
               .getOpenTelemetry()
               .getTracer(
                   MetricRegistryConstants.INSTRUMENTATION_SCOPE,
-                  GaxProperties.getLibraryVersion(this.getOptions().getClass())));
+                  GaxProperties.getLibraryVersion(this.getOptions().getClass())),
+          getOptions().isEnableExtendedTracing());
 
   static final String CREATE_MULTIPLEXED_SESSION = "CloudSpannerOperation.CreateMultiplexedSession";
   static final String CREATE_SESSION = "CloudSpannerOperation.CreateSession";
@@ -79,6 +81,8 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
   static final String QUERY = "CloudSpannerOperation.ExecuteStreamingQuery";
   static final String READ = "CloudSpannerOperation.ExecuteStreamingRead";
   static final String BATCH_WRITE = "CloudSpannerOperation.BatchWrite";
+  static final String UPDATE = "CloudSpannerOperation.ExecuteUpdate";
+  static final String BATCH_UPDATE = "CloudSpannerOperation.BatchUpdate";
 
   private static final Object CLIENT_ID_LOCK = new Object();
 
@@ -271,20 +275,40 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
         attributesBuilder.put("database", db.getDatabase());
         attributesBuilder.put("instance_id", db.getInstanceId().getName());
 
+        boolean useMultiplexedSession =
+            getOptions().getSessionPoolOptions().getUseMultiplexedSession();
+        boolean useMultiplexedSessionForRW =
+            getOptions().getSessionPoolOptions().getUseMultiplexedSessionForRW();
+
+        MultiplexedSessionDatabaseClient multiplexedSessionDatabaseClient =
+            useMultiplexedSession
+                ? new MultiplexedSessionDatabaseClient(SpannerImpl.this.getSessionClient(db))
+                : null;
+        AtomicLong numMultiplexedSessionsAcquired =
+            useMultiplexedSession
+                ? multiplexedSessionDatabaseClient.getNumSessionsAcquired()
+                : new AtomicLong();
+        AtomicLong numMultiplexedSessionsReleased =
+            useMultiplexedSession
+                ? multiplexedSessionDatabaseClient.getNumSessionsReleased()
+                : new AtomicLong();
         SessionPool pool =
             SessionPool.createPool(
                 getOptions(),
                 SpannerImpl.this.getSessionClient(db),
                 this.tracer,
                 labelValues,
-                attributesBuilder.build());
-        MultiplexedSessionDatabaseClient multiplexedSessionDatabaseClient =
-            getOptions().getSessionPoolOptions().getUseMultiplexedSession()
-                ? new MultiplexedSessionDatabaseClient(SpannerImpl.this.getSessionClient(db))
-                : null;
+                attributesBuilder.build(),
+                numMultiplexedSessionsAcquired,
+                numMultiplexedSessionsReleased);
         pool.maybeWaitOnMinSessions();
         DatabaseClientImpl dbClient =
-            createDatabaseClient(clientId, pool, multiplexedSessionDatabaseClient);
+            createDatabaseClient(
+                clientId,
+                pool,
+                getOptions().getSessionPoolOptions().getUseMultiplexedSessionBlindWrite(),
+                multiplexedSessionDatabaseClient,
+                useMultiplexedSessionForRW);
         dbClients.put(db, dbClient);
         return dbClient;
       }
@@ -295,8 +319,16 @@ class SpannerImpl extends BaseService<SpannerOptions> implements Spanner {
   DatabaseClientImpl createDatabaseClient(
       String clientId,
       SessionPool pool,
-      @Nullable MultiplexedSessionDatabaseClient multiplexedSessionClient) {
-    return new DatabaseClientImpl(clientId, pool, multiplexedSessionClient, tracer);
+      boolean useMultiplexedSessionBlindWrite,
+      @Nullable MultiplexedSessionDatabaseClient multiplexedSessionClient,
+      boolean useMultiplexedSessionForRW) {
+    return new DatabaseClientImpl(
+        clientId,
+        pool,
+        useMultiplexedSessionBlindWrite,
+        multiplexedSessionClient,
+        tracer,
+        useMultiplexedSessionForRW);
   }
 
   @Override

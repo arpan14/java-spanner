@@ -17,6 +17,7 @@
 package com.google.cloud.spanner;
 
 import static org.junit.Assert.assertThrows;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyMap;
 import static org.mockito.Mockito.doNothing;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.when;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.spanner.TransactionRunnerImpl.TransactionContextImpl;
 import com.google.cloud.spanner.spi.v1.SpannerRpc;
+import com.google.cloud.spanner.v1.stub.SpannerStubSettings;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import com.google.rpc.Code;
@@ -34,6 +36,7 @@ import com.google.rpc.Status;
 import com.google.spanner.v1.CommitRequest;
 import com.google.spanner.v1.ExecuteBatchDmlRequest;
 import com.google.spanner.v1.ExecuteBatchDmlResponse;
+import io.opentelemetry.api.common.Attributes;
 import java.util.Collections;
 import org.junit.Before;
 import org.junit.Test;
@@ -67,7 +70,19 @@ public class TransactionContextImplTest {
     doNothing().when(span).setStatus(any(Throwable.class));
     doNothing().when(span).end();
     doNothing().when(span).addAnnotation("Starting Commit");
+    when(tracer.createStatementAttributes(any(Statement.class), any()))
+        .thenReturn(Attributes.empty());
+    when(tracer.createStatementBatchAttributes(any(Iterable.class), any()))
+        .thenReturn(Attributes.empty());
     when(tracer.spanBuilderWithExplicitParent(SpannerImpl.COMMIT, span)).thenReturn(span);
+    when(tracer.spanBuilderWithExplicitParent(
+            eq(SpannerImpl.COMMIT), eq(span), any(Attributes.class)))
+        .thenReturn(span);
+    when(tracer.spanBuilderWithExplicitParent(
+            eq(SpannerImpl.BATCH_UPDATE), eq(span), any(Attributes.class)))
+        .thenReturn(span);
+    when(rpc.getCommitRetrySettings())
+        .thenReturn(SpannerStubSettings.newBuilder().commitSettings().getRetrySettings());
   }
 
   private TransactionContextImpl createContext() {
@@ -187,7 +202,7 @@ public class TransactionContextImplTest {
               .setSession(session.getName())
               .setTransactionId(transactionId)
               .build();
-      verify(rpc).commitAsync(Mockito.eq(request), anyMap());
+      verify(rpc).commitAsync(eq(request), anyMap());
     }
   }
 
@@ -210,6 +225,8 @@ public class TransactionContextImplTest {
             .setRpc(rpc)
             .setTransactionId(ByteString.copyFromUtf8("test"))
             .setOptions(Options.fromTransactionOptions())
+            .setTracer(tracer)
+            .setSpan(span)
             .build()) {
       impl.batchUpdate(Collections.singletonList(statement));
     }
